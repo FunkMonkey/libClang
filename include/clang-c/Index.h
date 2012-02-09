@@ -2394,7 +2394,9 @@ enum CXTypeKind {
   CXType_FunctionNoProto = 110,
   CXType_FunctionProto = 111,
   CXType_ConstantArray = 112,
-  CXType_Vector = 113
+  CXType_Vector = 113,
+  CXType_TemplateTypeParm = 114,
+  CXType_TemplateSpecialization = 115
 };
 
 /**
@@ -3001,6 +3003,14 @@ CINDEX_LINKAGE enum CXCursorKind clang_getTemplateCursorKind(CXCursor C);
  * from which it was instantiated. Otherwise, returns a NULL cursor.
  */
 CINDEX_LINKAGE CXCursor clang_getSpecializedCursorTemplate(CXCursor C);
+
+// =========================================================================================================================================
+
+CINDEX_LINKAGE unsigned clang_getTemplateSpecializationArgumentListSize(CXCursor C);
+
+
+
+// =========================================================================================================================================
 
 /**
  * \brief Given a cursor that references something else, return the source range

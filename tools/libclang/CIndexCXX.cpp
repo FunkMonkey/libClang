@@ -123,5 +123,62 @@ CXCursor clang_getSpecializedCursorTemplate(CXCursor C) {
   
   return MakeCXCursor(Template, static_cast<CXTranslationUnit>(C.data[2]));
 }
+
+// =========================================================================================================================================
+
+unsigned clang_getTemplateSpecializationArgumentListSize(CXCursor C)
+{
+  if (!clang_isDeclaration(C.kind))
+    return UINT_MAX;
+    
+  Decl *D = getCursorDecl(C);
+  if (!D)
+    return UINT_MAX;
+
+  if (ClassTemplateSpecializationDecl *ClassSpec 
+               = dyn_cast<ClassTemplateSpecializationDecl>(D)) {
+    
+    return ClassSpec->getTemplateArgs().size();
+
+  } else if (FunctionDecl *Function = dyn_cast<FunctionDecl>(D)) {
+	const TemplateArgumentList* TemplateArgList = Function->getTemplateSpecializationArgs();
+	return (TemplateArgList == 0) ? UINT_MAX : TemplateArgList->size();
+  }
+}
+
+CXCursor clang_getTemplateSpecializationArgument(CXCursor C, unsigned Index)
+{
+  if (!clang_isDeclaration(C.kind))
+    return clang_getNullCursor();
+    
+  Decl *D = getCursorDecl(C);
+  if (!D)
+    return clang_getNullCursor();
+
+  const TemplateArgumentList* TemplateArgList = 0;
+  if (ClassTemplateSpecializationDecl *ClassSpec 
+               = dyn_cast<ClassTemplateSpecializationDecl>(D)) {
+    
+    TemplateArgList = &(ClassSpec->getTemplateArgs());
+
+  } else if (FunctionDecl *Function = dyn_cast<FunctionDecl>(D)) {
+	TemplateArgList = Function->getTemplateSpecializationArgs();
+  }
+
+  if(!TemplateArgList)
+	  return clang_getNullCursor();
+
+  assert(Index < TemplateArgList->size() && "getTemplateSpecializationArgument(): Index out of bounds");
+
+  (*TemplateArgList)[Index];
+
+
+  return clang_getNullCursor();
+}
+
+
+
+
+// =========================================================================================================================================
   
 } // end extern "C"
