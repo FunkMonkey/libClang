@@ -170,10 +170,7 @@ CXCursor clang_getTemplateSpecializationArgument(CXCursor C, unsigned Index)
 
   assert(Index < TemplateArgList->size() && "getTemplateSpecializationArgument(): Index out of bounds");
 
-  (*TemplateArgList)[Index];
-
-
-  return clang_getNullCursor();
+  return MakeCursorTemplateArgument(&((*TemplateArgList)[Index]), static_cast<CXTranslationUnit>(C.data[2]));
 }
 
 

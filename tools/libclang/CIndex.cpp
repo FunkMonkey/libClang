@@ -3395,6 +3395,8 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return createCXString("ObjCDynamicDecl");
   case CXCursor_CXXAccessSpecifier:
     return createCXString("CXXAccessSpecifier");
+  case CXCursor_TemplateArgument:
+    return createCXString("TemplateArgument");
   }
 
   llvm_unreachable("Unhandled CXCursorKind");

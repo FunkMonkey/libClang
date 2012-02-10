@@ -717,6 +717,13 @@ cxcursor::getCursorOverloadedDeclRef(CXCursor C) {
                                        reinterpret_cast<uintptr_t>(C.data[1])));
 }
 
+CXCursor cxcursor::MakeCursorTemplateArgument(const TemplateArgument *Arg,
+                                               CXTranslationUnit TU) {
+  assert(Arg && TU && "Invalid arguments!");
+  CXCursor C = { CXCursor_TemplateArgument, 0, { 0, (void*)Arg, TU } };
+  return C;    
+}
+
 Decl *cxcursor::getCursorDecl(CXCursor Cursor) {
   return (Decl *)Cursor.data[0];
 }

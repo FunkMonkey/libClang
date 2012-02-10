@@ -1502,6 +1502,9 @@ enum CXCursorKind {
   
   CXCursor_LastRef                       = CXCursor_OverloadedDeclRef,
 
+  /* CXX Template Arguments */
+  CXCursor_TemplateArgument              = 60,
+
   /* Error conditions */
   CXCursor_FirstInvalid                  = 70,
   CXCursor_InvalidFile                   = 70,
@@ -3007,7 +3010,7 @@ CINDEX_LINKAGE CXCursor clang_getSpecializedCursorTemplate(CXCursor C);
 // =========================================================================================================================================
 
 CINDEX_LINKAGE unsigned clang_getTemplateSpecializationArgumentListSize(CXCursor C);
-
+CINDEX_LINKAGE CXCursor clang_getTemplateSpecializationArgument(CXCursor C, unsigned Index);
 
 
 // =========================================================================================================================================
