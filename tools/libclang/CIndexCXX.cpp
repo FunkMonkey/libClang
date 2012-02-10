@@ -14,6 +14,7 @@
 #include "CIndexer.h"
 #include "CXCursor.h"
 #include "CXType.h"
+#include "CXString.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclTemplate.h"
 
@@ -173,8 +174,64 @@ CXCursor clang_getTemplateSpecializationArgument(CXCursor C, unsigned Index)
   return MakeCursorTemplateArgument(&((*TemplateArgList)[Index]), static_cast<CXTranslationUnit>(C.data[2]));
 }
 
+const TemplateArgument* getTemplateArgumentFromCursor(CXCursor C)
+{
+  if(C.kind != CXCursor_TemplateArgument)
+    return 0;
+
+  return static_cast<const TemplateArgument*>(C.data[1]);
+}
+
+CXTemplateArgumentKind clang_getTemplateArgumentKind(CXCursor C)
+{
+  const TemplateArgument* TemplateArg = getTemplateArgumentFromCursor(C);
+  if(!TemplateArg)
+    return CXTemplateArgument_Invalid;
+  
+  return static_cast<CXTemplateArgumentKind>(TemplateArg->getKind());
+}
+
+CXString clang_getTemplateArgumentKindSpelling(enum CXTemplateArgumentKind Kind)
+{
+	const char *s = 0;
+#define TAKIND(X) case CXTemplateArgument_##X: s = ""  #X  ""; break
+  switch (Kind) {
+    TAKIND(Null);
+    TAKIND(Type);
+    TAKIND(Declaration);
+    TAKIND(Integral);
+    TAKIND(Template);
+    TAKIND(TemplateExpansion);
+    TAKIND(Expression);
+    TAKIND(Pack);
+    TAKIND(Invalid);
+  }
+#undef TAKIND
+  return cxstring::createCXString(s);
+}
 
 
+
+CXType clang_getTemplateArgumentAsType(CXCursor C)
+{
+  CXTranslationUnit TU = cxcursor::getCursorTU(C);
+  const TemplateArgument* TemplateArg = getTemplateArgumentFromCursor(C);
+
+  if(!TemplateArg || TemplateArg->getKind() != TemplateArgument::Type)
+    return cxtype::MakeCXType(QualType(), TU);
+
+  return cxtype::MakeCXType(TemplateArg->getAsType(), TU);
+}
+
+long long clang_getTemplateArgumentAsIntegral(CXCursor C)
+{
+  const TemplateArgument* TemplateArg = getTemplateArgumentFromCursor(C);
+
+  if(!TemplateArg || TemplateArg->getKind() != TemplateArgument::Integral)
+    return LLONG_MIN; 
+
+  return TemplateArg->getAsIntegral()->getSExtValue();
+}
 
 // =========================================================================================================================================
   

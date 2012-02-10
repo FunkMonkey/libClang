@@ -3009,9 +3009,45 @@ CINDEX_LINKAGE CXCursor clang_getSpecializedCursorTemplate(CXCursor C);
 
 // =========================================================================================================================================
 
+enum CXTemplateArgumentKind {
+  /// \brief Represents an empty template argument, e.g., one that has not
+  /// been deduced.
+  CXTemplateArgument_Null = 0,
+  /// The template argument is a type. Its value is stored in the
+  /// TypeOrValue field.
+  CXTemplateArgument_Type,
+  /// The template argument is a declaration that was provided for a pointer
+  /// or reference non-type template parameter.
+  CXTemplateArgument_Declaration,
+  /// The template argument is an integral value stored in an llvm::APSInt
+  /// that was provided for an integral non-type template parameter. 
+  CXTemplateArgument_Integral,
+  /// The template argument is a template name that was provided for a 
+  /// template template parameter.
+  CXTemplateArgument_Template,
+  /// The template argument is a pack expansion of a template name that was 
+  /// provided for a template template parameter.
+  CXTemplateArgument_TemplateExpansion,
+  /// The template argument is a value- or type-dependent expression
+  /// stored in an Expr*.
+  CXTemplateArgument_Expression,
+  /// The template argument is actually a parameter pack. Arguments are stored
+  /// in the Args struct.
+  CXTemplateArgument_Pack,
+
+  CXTemplateArgument_Invalid = 20
+};
+
+CINDEX_LINKAGE CXString clang_getTemplateArgumentKindSpelling(enum CXTemplateArgumentKind Kind);
+
+/** Template Arguments
+*/
 CINDEX_LINKAGE unsigned clang_getTemplateSpecializationArgumentListSize(CXCursor C);
 CINDEX_LINKAGE CXCursor clang_getTemplateSpecializationArgument(CXCursor C, unsigned Index);
+CINDEX_LINKAGE CXTemplateArgumentKind clang_getTemplateArgumentKind(CXCursor C);
 
+CINDEX_LINKAGE CXType clang_getTemplateArgumentAsType(CXCursor C);
+CINDEX_LINKAGE long long clang_getTemplateArgumentAsIntegral(CXCursor C);
 
 // =========================================================================================================================================
 
