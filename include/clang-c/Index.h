@@ -3048,6 +3048,8 @@ CINDEX_LINKAGE CXTemplateArgumentKind clang_getTemplateArgumentKind(CXCursor C);
 
 CINDEX_LINKAGE CXType clang_getTemplateArgumentAsType(CXCursor C);
 CINDEX_LINKAGE long long clang_getTemplateArgumentAsIntegral(CXCursor C);
+CINDEX_LINKAGE CXCursor clang_getTemplateArgumentAsDeclaration(CXCursor C);
+CINDEX_LINKAGE CXCursor clang_getTemplateArgumentAsTemplate(CXCursor C);
 
 // =========================================================================================================================================
 

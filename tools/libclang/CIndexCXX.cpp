@@ -233,6 +233,38 @@ long long clang_getTemplateArgumentAsIntegral(CXCursor C)
   return TemplateArg->getAsIntegral()->getSExtValue();
 }
 
+CXCursor clang_getTemplateArgumentAsDeclaration(CXCursor C)
+{
+  const TemplateArgument* TemplateArg = getTemplateArgumentFromCursor(C);
+
+  if(!TemplateArg || TemplateArg->getKind() != TemplateArgument::Declaration)
+    return clang_getNullCursor(); 
+
+  Decl* D = TemplateArg->getAsDecl();
+  if(!D)
+	return clang_getNullCursor(); 
+
+  CXTranslationUnit TU = cxcursor::getCursorTU(C);
+
+  return MakeCXCursor(D, TU);
+}
+
+CXCursor clang_getTemplateArgumentAsTemplate(CXCursor C)
+{
+  const TemplateArgument* TemplateArg = getTemplateArgumentFromCursor(C);
+
+  if(!TemplateArg || TemplateArg->getKind() != TemplateArgument::Template)
+    return clang_getNullCursor(); 
+
+  TemplateDecl* D = TemplateArg->getAsTemplate().getAsTemplateDecl();
+  if(!D)
+	return clang_getNullCursor();
+
+  CXTranslationUnit TU = cxcursor::getCursorTU(C);
+
+  return MakeCXCursor(D, TU);
+}
+
 // =========================================================================================================================================
   
 } // end extern "C"
