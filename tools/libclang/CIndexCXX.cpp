@@ -127,7 +127,7 @@ CXCursor clang_getSpecializedCursorTemplate(CXCursor C) {
 
 // =========================================================================================================================================
 
-unsigned clang_getTemplateSpecializationArgumentListSize(CXCursor C)
+unsigned clang_getTemplateSpecializationNumArguments(CXCursor C)
 {
   if (!clang_isDeclaration(C.kind))
     return UINT_MAX;
@@ -136,15 +136,26 @@ unsigned clang_getTemplateSpecializationArgumentListSize(CXCursor C)
   if (!D)
     return UINT_MAX;
 
+  const TemplateArgumentList* TemplateArgList = 0;
+
   if (ClassTemplateSpecializationDecl *ClassSpec 
                = dyn_cast<ClassTemplateSpecializationDecl>(D)) {
     
-    return ClassSpec->getTemplateArgs().size();
+    TemplateArgList =  &(ClassSpec->getTemplateArgs());
 
   } else if (FunctionDecl *Function = dyn_cast<FunctionDecl>(D)) {
-	const TemplateArgumentList* TemplateArgList = Function->getTemplateSpecializationArgs();
-	return (TemplateArgList == 0) ? UINT_MAX : TemplateArgList->size();
+	FunctionDecl::TemplatedKind TemplKind = Function->getTemplatedKind();
+	switch(TemplKind){
+	  case FunctionDecl::TK_MemberSpecialization: 
+	  case FunctionDecl::TK_DependentFunctionTemplateSpecialization: 
+	  case FunctionDecl::TK_FunctionTemplateSpecialization: 
+		TemplateArgList = Function->getTemplateSpecializationArgs();
+		break;
+	  default: break;
+	}
   }
+
+  return (TemplateArgList == 0) ? UINT_MAX : TemplateArgList->size();
 }
 
 CXCursor clang_getTemplateSpecializationArgument(CXCursor C, unsigned Index)
@@ -163,7 +174,17 @@ CXCursor clang_getTemplateSpecializationArgument(CXCursor C, unsigned Index)
     TemplateArgList = &(ClassSpec->getTemplateArgs());
 
   } else if (FunctionDecl *Function = dyn_cast<FunctionDecl>(D)) {
-	TemplateArgList = Function->getTemplateSpecializationArgs();
+	  
+	FunctionDecl::TemplatedKind TemplKind = Function->getTemplatedKind();
+	switch(TemplKind){
+	  case FunctionDecl::TK_MemberSpecialization: 
+	  case FunctionDecl::TK_DependentFunctionTemplateSpecialization: 
+	  case FunctionDecl::TK_FunctionTemplateSpecialization: 
+		TemplateArgList = Function->getTemplateSpecializationArgs();
+		break;
+	  default: break;
+	}
+	
   }
 
   if(!TemplateArgList)
@@ -263,6 +284,105 @@ CXCursor clang_getTemplateArgumentAsTemplate(CXCursor C)
   CXTranslationUnit TU = cxcursor::getCursorTU(C);
 
   return MakeCXCursor(D, TU);
+}
+
+CXCursor clang_getTemplateArgumentAsExpression(CXCursor C)
+{
+  const TemplateArgument* TemplateArg = getTemplateArgumentFromCursor(C);
+
+  if(!TemplateArg || TemplateArg->getKind() != TemplateArgument::Expression)
+    return clang_getNullCursor(); 
+
+  Expr* E = TemplateArg->getAsExpr();
+  if(!E)
+	return clang_getNullCursor();
+
+  CXTranslationUnit TU = cxcursor::getCursorTU(C);
+
+  // FIXME: Currently passes 0 as the parent - how do we get the real parent?
+  return MakeCXCursor(E, 0, TU);
+}
+
+// =========================================================================================================================================
+
+unsigned clang_getTemplateNumParameters(CXCursor C)
+{
+  if (!clang_isDeclaration(C.kind))
+    return UINT_MAX;
+    
+  Decl *D = getCursorDecl(C);
+  if (!D)
+    return UINT_MAX;
+
+  TemplateParameterList* TemplateParamList = 0;
+  if (ClassTemplateDecl *ClassTempDecl
+               = dyn_cast<ClassTemplateDecl>(D)) {
+    
+	TemplateParamList =  ClassTempDecl->getTemplateParameters();
+
+  } else if (ClassTemplatePartialSpecializationDecl *ClassPartialSpec
+               = dyn_cast<ClassTemplatePartialSpecializationDecl>(D)) {
+
+	// FIXME: currently returns only first parameter list - how do we know which parameter list is the right one?
+	if(ClassPartialSpec->getNumTemplateParameterLists() > 0)
+	  TemplateParamList =  ClassPartialSpec->getTemplateParameterList(0);
+  
+  } else if (FunctionDecl *Function = dyn_cast<FunctionDecl>(D)) {
+
+	FunctionDecl::TemplatedKind TemplKind = Function->getTemplatedKind();
+	switch(TemplKind){
+	case FunctionDecl::TK_FunctionTemplate:
+		// FIXME: currently returns only first parameter list - how do we know which parameter list is the right one?
+		TemplateParamList = Function->getTemplateParameterList(0);
+		break;
+	  default: break;
+	}
+  }
+
+  return (TemplateParamList == 0) ? UINT_MAX : TemplateParamList->size();
+}
+
+CXCursor clang_getTemplateParameter(CXCursor C, unsigned Index)
+{
+  if (!clang_isDeclaration(C.kind))
+    return clang_getNullCursor();
+    
+  Decl *D = getCursorDecl(C);
+  if (!D)
+    return clang_getNullCursor();
+
+  TemplateParameterList* TemplateParamList = 0;
+  if (ClassTemplateDecl *ClassTempDecl
+               = dyn_cast<ClassTemplateDecl>(D)) {
+    
+	TemplateParamList =  ClassTempDecl->getTemplateParameters();
+
+  } else if (ClassTemplatePartialSpecializationDecl *ClassPartialSpec
+               = dyn_cast<ClassTemplatePartialSpecializationDecl>(D)) {
+
+	// FIXME: currently returns only first parameter list - how do we know which parameter list is the right one?
+	if(ClassPartialSpec->getNumTemplateParameterLists() > 0)
+	  TemplateParamList =  ClassPartialSpec->getTemplateParameterList(0);
+  
+  } else if (FunctionDecl *Function = dyn_cast<FunctionDecl>(D)) {
+
+	FunctionDecl::TemplatedKind TemplKind = Function->getTemplatedKind();
+	switch(TemplKind){
+	case FunctionDecl::TK_FunctionTemplate:
+		// FIXME: currently returns only first parameter list - how do we know which parameter list is the right one?
+		TemplateParamList = Function->getTemplateParameterList(0);
+		break;
+	  default: break;
+	}
+  }
+
+  if(!TemplateParamList)
+	  return clang_getNullCursor();
+
+  assert(Index < TemplateParamList->size() && "getTemplateParameter(): Index out of bounds");
+
+  CXTranslationUnit TU = cxcursor::getCursorTU(C);
+  return MakeCXCursor(TemplateParamList->getParam(Index), TU);
 }
 
 // =========================================================================================================================================

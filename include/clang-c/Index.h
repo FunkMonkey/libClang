@@ -3009,6 +3009,8 @@ CINDEX_LINKAGE CXCursor clang_getSpecializedCursorTemplate(CXCursor C);
 
 // =========================================================================================================================================
 
+/** Template Arguments
+*/
 enum CXTemplateArgumentKind {
   /// \brief Represents an empty template argument, e.g., one that has not
   /// been deduced.
@@ -3040,9 +3042,7 @@ enum CXTemplateArgumentKind {
 
 CINDEX_LINKAGE CXString clang_getTemplateArgumentKindSpelling(enum CXTemplateArgumentKind Kind);
 
-/** Template Arguments
-*/
-CINDEX_LINKAGE unsigned clang_getTemplateSpecializationArgumentListSize(CXCursor C);
+CINDEX_LINKAGE unsigned clang_getTemplateSpecializationNumArguments(CXCursor C);
 CINDEX_LINKAGE CXCursor clang_getTemplateSpecializationArgument(CXCursor C, unsigned Index);
 CINDEX_LINKAGE CXTemplateArgumentKind clang_getTemplateArgumentKind(CXCursor C);
 
@@ -3050,6 +3050,12 @@ CINDEX_LINKAGE CXType clang_getTemplateArgumentAsType(CXCursor C);
 CINDEX_LINKAGE long long clang_getTemplateArgumentAsIntegral(CXCursor C);
 CINDEX_LINKAGE CXCursor clang_getTemplateArgumentAsDeclaration(CXCursor C);
 CINDEX_LINKAGE CXCursor clang_getTemplateArgumentAsTemplate(CXCursor C);
+CINDEX_LINKAGE CXCursor clang_getTemplateArgumentAsExpression(CXCursor C);
+
+/** Template Parameters
+*/
+CINDEX_LINKAGE unsigned clang_getTemplateNumParameters(CXCursor C);
+CINDEX_LINKAGE CXCursor clang_getTemplateParameter(CXCursor C, unsigned Index);
 
 // =========================================================================================================================================
 
