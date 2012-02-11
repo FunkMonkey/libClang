@@ -3395,8 +3395,22 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return createCXString("ObjCDynamicDecl");
   case CXCursor_CXXAccessSpecifier:
     return createCXString("CXXAccessSpecifier");
-  case CXCursor_TemplateArgument:
-    return createCXString("TemplateArgument");
+  case CXCursor_TemplateNullArgument:
+    return createCXString("TemplateNullArgument");
+  case CXCursor_TemplateTypeArgument:
+    return createCXString("TemplateTypeArgument");
+  case CXCursor_TemplateDeclarationArgument:
+    return createCXString("TemplateDeclarationArgument");
+  case CXCursor_TemplateIntegralArgument:
+    return createCXString("TemplateIntegralArgument");
+  case CXCursor_TemplateTemplateArgument:
+    return createCXString("TemplateTemplateArgument");
+  case CXCursor_TemplateTemplateExpansionArgument:
+    return createCXString("TemplateTemplateExpansionArgument");
+  case CXCursor_TemplateExpressionArgument:
+    return createCXString("TemplateExpressionArgument");
+  case CXCursor_TemplatePackArgument:
+    return createCXString("TemplatePackArgument");
   }
 
   llvm_unreachable("Unhandled CXCursorKind");

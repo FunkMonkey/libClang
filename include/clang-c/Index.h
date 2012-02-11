@@ -1409,6 +1409,29 @@ enum CXCursorKind {
   CXCursor_FirstDecl                     = CXCursor_UnexposedDecl,
   CXCursor_LastDecl                      = CXCursor_CXXAccessSpecifier,
 
+  /* FIXME: all numbers need to change, as well as CXCursor_LastDecl */
+  /* \brief An empty template argument, e.g., one that has not
+     been deduced. */
+  CXCursor_TemplateNullArgument          = 60,
+  /* \brief A type template argument */
+  CXCursor_TemplateTypeArgument          = 61,
+  /* \brief  The template argument is a declaration that was provided for a pointer
+     or reference non-type template parameter. */
+  CXCursor_TemplateDeclarationArgument   = 62,
+  /* \brief An integral template argument, that was provided for an integral 
+     non-type template parameter. */
+  CXCursor_TemplateIntegralArgument      = 63,
+  /* \brief A template template argument that was provided for a 
+     template template parameter. */
+  CXCursor_TemplateTemplateArgument      = 64,
+  /* \brief The template argument is a pack expansion of a template name that was 
+     provided for a template template parameter. */
+  CXCursor_TemplateTemplateExpansionArgument = 65,
+  /* \brief The template argument is a value- or type-dependent expression. */
+  CXCursor_TemplateExpressionArgument    = 66,
+  /* \brief The template argument is actually a parameter pack.  */
+  CXCursor_TemplatePackArgument          = 67,
+
   /* References */
   CXCursor_FirstRef                      = 40, /* Decl references */
   CXCursor_ObjCSuperClassRef             = 40,
@@ -1501,9 +1524,6 @@ enum CXCursorKind {
   CXCursor_OverloadedDeclRef             = 49,
   
   CXCursor_LastRef                       = CXCursor_OverloadedDeclRef,
-
-  /* CXX Template Arguments */
-  CXCursor_TemplateArgument              = 60,
 
   /* Error conditions */
   CXCursor_FirstInvalid                  = 70,
@@ -3009,48 +3029,14 @@ CINDEX_LINKAGE CXCursor clang_getSpecializedCursorTemplate(CXCursor C);
 
 // =========================================================================================================================================
 
-/** Template Arguments
-*/
-enum CXTemplateArgumentKind {
-  /// \brief Represents an empty template argument, e.g., one that has not
-  /// been deduced.
-  CXTemplateArgument_Null = 0,
-  /// The template argument is a type. Its value is stored in the
-  /// TypeOrValue field.
-  CXTemplateArgument_Type,
-  /// The template argument is a declaration that was provided for a pointer
-  /// or reference non-type template parameter.
-  CXTemplateArgument_Declaration,
-  /// The template argument is an integral value stored in an llvm::APSInt
-  /// that was provided for an integral non-type template parameter. 
-  CXTemplateArgument_Integral,
-  /// The template argument is a template name that was provided for a 
-  /// template template parameter.
-  CXTemplateArgument_Template,
-  /// The template argument is a pack expansion of a template name that was 
-  /// provided for a template template parameter.
-  CXTemplateArgument_TemplateExpansion,
-  /// The template argument is a value- or type-dependent expression
-  /// stored in an Expr*.
-  CXTemplateArgument_Expression,
-  /// The template argument is actually a parameter pack. Arguments are stored
-  /// in the Args struct.
-  CXTemplateArgument_Pack,
-
-  CXTemplateArgument_Invalid = 20
-};
-
-CINDEX_LINKAGE CXString clang_getTemplateArgumentKindSpelling(enum CXTemplateArgumentKind Kind);
-
 CINDEX_LINKAGE unsigned clang_getTemplateSpecializationNumArguments(CXCursor C);
 CINDEX_LINKAGE CXCursor clang_getTemplateSpecializationArgument(CXCursor C, unsigned Index);
-CINDEX_LINKAGE CXTemplateArgumentKind clang_getTemplateArgumentKind(CXCursor C);
 
-CINDEX_LINKAGE CXType clang_getTemplateArgumentAsType(CXCursor C);
-CINDEX_LINKAGE long long clang_getTemplateArgumentAsIntegral(CXCursor C);
-CINDEX_LINKAGE CXCursor clang_getTemplateArgumentAsDeclaration(CXCursor C);
-CINDEX_LINKAGE CXCursor clang_getTemplateArgumentAsTemplate(CXCursor C);
-CINDEX_LINKAGE CXCursor clang_getTemplateArgumentAsExpression(CXCursor C);
+CINDEX_LINKAGE CXType clang_getTemplateArgumentValueAsType(CXCursor C);
+CINDEX_LINKAGE long long clang_getTemplateArgumentValueAsIntegral(CXCursor C);
+CINDEX_LINKAGE CXCursor clang_getTemplateArgumentValueAsDeclaration(CXCursor C);
+CINDEX_LINKAGE CXCursor clang_getTemplateArgumentValueAsTemplate(CXCursor C);
+CINDEX_LINKAGE CXCursor clang_getTemplateArgumentValueAsExpression(CXCursor C);
 
 /** Template Parameters
 */

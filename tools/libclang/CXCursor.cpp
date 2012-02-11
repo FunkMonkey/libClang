@@ -720,7 +720,23 @@ cxcursor::getCursorOverloadedDeclRef(CXCursor C) {
 CXCursor cxcursor::MakeCursorTemplateArgument(const TemplateArgument *Arg,
                                                CXTranslationUnit TU) {
   assert(Arg && TU && "Invalid arguments!");
-  CXCursor C = { CXCursor_TemplateArgument, 0, { 0, (void*)Arg, TU } };
+
+  CXCursorKind K;
+#define TAKIND(X) case TemplateArgument::##X: K = CXCursor_Template##X##Argument; break
+  switch(Arg->getKind())
+  {
+	TAKIND(Null);
+	TAKIND(Type);
+	TAKIND(Declaration);
+	TAKIND(Integral);
+	TAKIND(Template);
+	TAKIND(TemplateExpansion);
+	TAKIND(Expression);
+	TAKIND(Pack);
+  }
+  #undef TAKIND
+
+  CXCursor C = { K, 0, { 0, (void*)Arg, TU } };
   return C;    
 }
 
