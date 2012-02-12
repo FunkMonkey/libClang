@@ -722,7 +722,7 @@ CXCursor cxcursor::MakeCursorTemplateArgument(const TemplateArgument *Arg,
   assert(Arg && TU && "Invalid arguments!");
 
   CXCursorKind K;
-#define TAKIND(X) case TemplateArgument::##X: K = CXCursor_Template##X##Argument; break
+#define TAKIND(X) case TemplateArgument::X: K = CXCursor_Template##X##Argument; break
   switch(Arg->getKind())
   {
 	TAKIND(Null);
