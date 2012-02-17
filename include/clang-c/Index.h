@@ -2419,7 +2419,8 @@ enum CXTypeKind {
   CXType_ConstantArray = 112,
   CXType_Vector = 113,
   CXType_TemplateTypeParm = 114,
-  CXType_TemplateSpecialization = 115
+  CXType_TemplateSpecialization = 115,
+  CXType_Elaborated = 116
 };
 
 /**
@@ -3029,6 +3030,7 @@ CINDEX_LINKAGE CXCursor clang_getSpecializedCursorTemplate(CXCursor C);
 
 // =========================================================================================================================================
 
+CINDEX_LINKAGE unsigned clang_isTemplateArgument(CXCursor C);
 CINDEX_LINKAGE unsigned clang_getTemplateSpecializationNumArguments(CXCursor C);
 CINDEX_LINKAGE CXCursor clang_getTemplateSpecializationArgument(CXCursor C, unsigned Index);
 
@@ -3042,6 +3044,8 @@ CINDEX_LINKAGE CXCursor clang_getTemplateArgumentValueAsExpression(CXCursor C);
 */
 CINDEX_LINKAGE unsigned clang_getTemplateNumParameters(CXCursor C);
 CINDEX_LINKAGE CXCursor clang_getTemplateParameter(CXCursor C, unsigned Index);
+
+CINDEX_LINKAGE enum CX_CXXAccessSpecifier clang_getCXXMemberAccessSpecifier(CXCursor);
 
 // =========================================================================================================================================
 

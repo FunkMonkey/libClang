@@ -187,7 +187,7 @@ typedef llvm::PointerUnion3<OverloadExpr *, Decl *,
 std::pair<OverloadedDeclRefStorage, SourceLocation>
   getCursorOverloadedDeclRef(CXCursor C);
 
-CXCursor MakeCursorTemplateArgument(const TemplateArgument* arg, CXTranslationUnit TU);
+CXCursor MakeCursorTemplateArgument(const TemplateArgument* arg, Decl* ParentDecl, CXTranslationUnit TU);
   
 Decl *getCursorDecl(CXCursor Cursor);
 Expr *getCursorExpr(CXCursor Cursor);

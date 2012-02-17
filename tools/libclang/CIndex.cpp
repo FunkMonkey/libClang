@@ -5282,6 +5282,12 @@ CXCursor clang_getCursorSemanticParent(CXCursor cursor) {
                           getCursorTU(cursor));
     }
   }
+
+  if (clang_isTemplateArgument(cursor))
+  {
+	  if(Decl *D = getCursorParentDecl(cursor))
+		  return MakeCXCursor(D, getCursorTU(cursor));
+  }
   
   if (clang_isStatement(cursor.kind) || clang_isExpression(cursor.kind)) {
     if (Decl *D = getCursorDecl(cursor))

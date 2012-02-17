@@ -192,17 +192,17 @@ CXCursor clang_getTemplateSpecializationArgument(CXCursor C, unsigned Index)
 
   assert(Index < TemplateArgList->size() && "getTemplateSpecializationArgument(): Index out of bounds");
 
-  return MakeCursorTemplateArgument(&((*TemplateArgList)[Index]), static_cast<CXTranslationUnit>(C.data[2]));
+  return MakeCursorTemplateArgument(&((*TemplateArgList)[Index]), D, static_cast<CXTranslationUnit>(C.data[2]));
 }
 
-bool isTemplateArgument(CXCursor C)
+unsigned clang_isTemplateArgument(CXCursor C)
 {
-	return (C.kind >= CXCursor_TemplateNullArgument && C.kind <= CXCursor_TemplatePackArgument);
+	return (C.kind >= CXCursor_TemplateNullArgument && C.kind <= CXCursor_TemplatePackArgument) ? 1 : 0;
 }
 
 const TemplateArgument* getTemplateArgumentFromCursor(CXCursor C)
 {
-  if(!isTemplateArgument(C))
+  if(clang_isTemplateArgument(C) == 0)
     return 0;
 
   return static_cast<const TemplateArgument*>(C.data[1]);
@@ -336,4 +336,37 @@ CXCursor clang_getTemplateParameter(CXCursor C, unsigned Index)
 
 // =========================================================================================================================================
   
+
+enum CX_CXXAccessSpecifier clang_getCXXMemberAccessSpecifier(CXCursor C)
+{
+	AccessSpecifier spec = AS_none;
+
+	switch(C.kind)
+	{
+	case CXCursor_CXXMethod:
+	case CXCursor_ClassDecl:
+	case CXCursor_StructDecl:
+	case CXCursor_FieldDecl:
+	case CXCursor_VarDecl:
+	case CXCursor_EnumDecl:
+	case CXCursor_EnumConstantDecl:
+	case CXCursor_ClassTemplate:
+	case CXCursor_FunctionTemplate:
+	case CXCursor_ClassTemplatePartialSpecialization:
+		spec = getCursorDecl(C)->getAccess();
+		break;
+	default:
+		spec = AS_none;
+	}
+
+	switch (spec) {
+	case AS_public: return CX_CXXPublic;
+	case AS_protected: return CX_CXXProtected;
+	case AS_private: return CX_CXXPrivate;
+	case AS_none: return CX_CXXInvalidAccessSpecifier;
+	}
+
+	llvm_unreachable("Invalid AccessSpecifier!");
+};
+
 } // end extern "C"

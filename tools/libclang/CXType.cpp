@@ -88,6 +88,7 @@ static CXTypeKind GetTypeKind(QualType T) {
     TKCASE(Vector);
 	TKCASE(TemplateTypeParm);
 	TKCASE(TemplateSpecialization);
+	TKCASE(Elaborated);
     default:
       return CXType_Unexposed;
   }
@@ -411,6 +412,7 @@ CXString clang_getTypeKindSpelling(enum CXTypeKind K) {
     TKIND(Vector);
 	TKIND(TemplateTypeParm);
 	TKIND(TemplateSpecialization);
+	TKIND(Elaborated);
   }
 #undef TKIND
   return cxstring::createCXString(s);
