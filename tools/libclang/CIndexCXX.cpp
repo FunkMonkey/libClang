@@ -226,7 +226,7 @@ long long clang_getTemplateArgumentValueAsIntegral(CXCursor C)
   if(!TemplateArg || TemplateArg->getKind() != TemplateArgument::Integral)
     return LLONG_MIN; 
 
-  return TemplateArg->getAsIntegral()->getSExtValue();
+  return TemplateArg->getAsIntegral().getSExtValue();
 }
 
 CXCursor clang_getTemplateArgumentValueAsDeclaration(CXCursor C)
