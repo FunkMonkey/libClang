@@ -2857,6 +2857,10 @@ CXCursorKind clang::getCursorKindForDecl(Decl *D) {
       case ObjCPropertyImplDecl::Synthesize:
         return CXCursor_ObjCSynthesizeDecl;
       }
+	case Decl::LinkageSpec:
+	  return CXCursor_LinkageSpec;
+	case Decl::TranslationUnit:
+	  return CXCursor_TranslationUnit;
       
     default:
       if (TagDecl *TD = dyn_cast<TagDecl>(D)) {

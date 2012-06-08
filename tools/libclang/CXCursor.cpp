@@ -750,6 +750,29 @@ cxcursor::getCursorOverloadedDeclRef(CXCursor C) {
                                        reinterpret_cast<uintptr_t>(C.data[1])));
 }
 
+CXCursor cxcursor::MakeCursorTemplateArgument(const TemplateArgument *Arg, Decl* ParentDecl,
+                                               CXTranslationUnit TU) {
+  assert(Arg && ParentDecl && TU && "Invalid arguments!");
+
+  CXCursorKind K;
+#define TAKIND(X) case TemplateArgument::X: K = CXCursor_Template##X##Argument; break
+  switch(Arg->getKind())
+  {
+	TAKIND(Null);
+	TAKIND(Type);
+	TAKIND(Declaration);
+	TAKIND(Integral);
+	TAKIND(Template);
+	TAKIND(TemplateExpansion);
+	TAKIND(Expression);
+	TAKIND(Pack);
+  }
+  #undef TAKIND
+
+  CXCursor C = { K, 0, { (void*)ParentDecl, (void*)Arg, TU } };
+  return C;    
+}
+
 Decl *cxcursor::getCursorDecl(CXCursor Cursor) {
   return (Decl *)Cursor.data[0];
 }

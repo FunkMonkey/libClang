@@ -42,6 +42,7 @@ class TemplateDecl;
 class TemplateName;
 class TypeDecl;
 class VarDecl;
+class TemplateArgument;
   
 namespace cxcursor {
 
@@ -194,6 +195,8 @@ typedef llvm::PointerUnion3<OverloadExpr *, Decl *,
 /// declaration, or template name along with the source location.
 std::pair<OverloadedDeclRefStorage, SourceLocation>
   getCursorOverloadedDeclRef(CXCursor C);
+
+CXCursor MakeCursorTemplateArgument(const TemplateArgument* arg, Decl* ParentDecl, CXTranslationUnit TU);
   
 Decl *getCursorDecl(CXCursor Cursor);
 Expr *getCursorExpr(CXCursor Cursor);

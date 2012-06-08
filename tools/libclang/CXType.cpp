@@ -86,6 +86,9 @@ static CXTypeKind GetTypeKind(QualType T) {
     TKCASE(FunctionProto);
     TKCASE(ConstantArray);
     TKCASE(Vector);
+	TKCASE(TemplateTypeParm);
+	TKCASE(TemplateSpecialization);
+	TKCASE(Elaborated);
     default:
       return CXType_Unexposed;
   }
@@ -361,7 +364,10 @@ try_again:
     D = cast<InjectedClassNameType>(TP)->getDecl();
     break;
 
-  // FIXME: Template type parameters!      
+  // FIXME: Template type parameters!
+  case Type::TemplateTypeParm:
+	  D = cast<TemplateTypeParmType>(TP)->getDecl();
+	  break;
 
   case Type::Elaborated:
     TP = cast<ElaboratedType>(TP)->getNamedType().getTypePtrOrNull();
@@ -425,6 +431,9 @@ CXString clang_getTypeKindSpelling(enum CXTypeKind K) {
     TKIND(FunctionProto);
     TKIND(ConstantArray);
     TKIND(Vector);
+	TKIND(TemplateTypeParm);
+	TKIND(TemplateSpecialization);
+	TKIND(Elaborated);
   }
 #undef TKIND
   return cxstring::createCXString(s);
