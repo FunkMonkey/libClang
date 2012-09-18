@@ -294,6 +294,16 @@ TEST(DeclarationMatcher, ClassIsDerived) {
       recordDecl(isDerivedFrom(recordDecl(hasName("X")).bind("test")))));
 }
 
+TEST(DeclarationMatcher, ClassDerivedFromDependentTemplateSpecialization) {
+  EXPECT_TRUE(matches(
+     "template <typename T> struct A {"
+     "  template <typename T2> struct F {};"
+     "};"
+     "template <typename T> struct B : A<T>::template F<T> {};"
+     "B<int> b;",
+     recordDecl(hasName("B"), isDerivedFrom(recordDecl()))));
+}
+
 TEST(ClassTemplate, DoesNotMatchClass) {
   DeclarationMatcher ClassX = classTemplateDecl(hasName("X"));
   EXPECT_TRUE(notMatches("class X;", ClassX));
@@ -2227,6 +2237,20 @@ TEST(StaticCast, DoesNotMatchOtherCasts) {
                          "B b;"
                          "D* p = dynamic_cast<D*>(&b);",
                          staticCastExpr()));
+}
+
+TEST(CStyleCast, MatchesSimpleCase) {
+  EXPECT_TRUE(matches("int i = (int) 2.2f;", cStyleCastExpr()));
+}
+
+TEST(CStyleCast, DoesNotMatchOtherCasts) {
+  EXPECT_TRUE(notMatches("char* p = static_cast<char*>(0);"
+                         "char q, *r = const_cast<char*>(&q);"
+                         "void* s = reinterpret_cast<char*>(&s);"
+                         "struct B { virtual ~B() {} }; struct D : B {};"
+                         "B b;"
+                         "D* t = dynamic_cast<D*>(&b);",
+                         cStyleCastExpr()));
 }
 
 TEST(HasDestinationType, MatchesSimpleCase) {
