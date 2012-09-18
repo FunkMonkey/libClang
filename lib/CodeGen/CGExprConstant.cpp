@@ -691,6 +691,9 @@ public:
 
     case CK_Dependent: llvm_unreachable("saw dependent cast!");
 
+    case CK_BuiltinFnToFnPtr:
+      llvm_unreachable("builtin functions are handled elsewhere");
+
     case CK_ReinterpretMemberPointer:
     case CK_DerivedToBaseMemberPointer:
     case CK_BaseToDerivedMemberPointer:
@@ -811,11 +814,7 @@ public:
     return llvm::ConstantArray::get(AType, Elts);
   }
 
-  llvm::Constant *EmitStructInitialization(InitListExpr *ILE) {
-    return ConstStructBuilder::BuildStruct(CGM, CGF, ILE);
-  }
-
-  llvm::Constant *EmitUnionInitialization(InitListExpr *ILE) {
+  llvm::Constant *EmitRecordInitialization(InitListExpr *ILE) {
     return ConstStructBuilder::BuildStruct(CGM, CGF, ILE);
   }
 
@@ -828,10 +827,7 @@ public:
       return EmitArrayInitialization(ILE);
 
     if (ILE->getType()->isRecordType())
-      return EmitStructInitialization(ILE);
-
-    if (ILE->getType()->isUnionType())
-      return EmitUnionInitialization(ILE);
+      return EmitRecordInitialization(ILE);
 
     return 0;
   }
@@ -932,7 +928,8 @@ public:
         C = new llvm::GlobalVariable(CGM.getModule(), C->getType(),
                                      E->getType().isConstant(CGM.getContext()),
                                      llvm::GlobalValue::InternalLinkage,
-                                     C, ".compoundliteral", 0, false,
+                                     C, ".compoundliteral", 0,
+                                     llvm::GlobalVariable::NotThreadLocal,
                           CGM.getContext().getTargetAddressSpace(E->getType()));
       return C;
     }
@@ -1300,7 +1297,8 @@ FillInNullDataMemberPointers(CodeGenModule &CGM, QualType T,
       if (CGM.getTypes().isZeroInitializable(BaseDecl))
         continue;
 
-      uint64_t BaseOffset = Layout.getBaseClassOffsetInBits(BaseDecl);
+      uint64_t BaseOffset =
+        CGM.getContext().toBits(Layout.getBaseClassOffset(BaseDecl));
       FillInNullDataMemberPointers(CGM, I->getType(),
                                    Elements, StartOffset + BaseOffset);
     }

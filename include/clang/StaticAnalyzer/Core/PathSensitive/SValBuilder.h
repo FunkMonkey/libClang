@@ -15,6 +15,7 @@
 #ifndef LLVM_CLANG_GR_SVALBUILDER
 #define LLVM_CLANG_GR_SVALBUILDER
 
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
@@ -141,19 +142,19 @@ public:
 
   // Forwarding methods to SymbolManager.
 
-  const SymbolConjured* getConjuredSymbol(const Stmt *stmt,
-                                          const LocationContext *LCtx,
-                                          QualType type,
-                                          unsigned visitCount,
-                                          const void *symbolTag = 0) {
-    return SymMgr.getConjuredSymbol(stmt, LCtx, type, visitCount, symbolTag);
+  const SymbolConjured* conjureSymbol(const Stmt *stmt,
+                                      const LocationContext *LCtx,
+                                      QualType type,
+                                      unsigned visitCount,
+                                      const void *symbolTag = 0) {
+    return SymMgr.conjureSymbol(stmt, LCtx, type, visitCount, symbolTag);
   }
 
-  const SymbolConjured* getConjuredSymbol(const Expr *expr,
-                                          const LocationContext *LCtx,
-                                          unsigned visitCount,
-                                          const void *symbolTag = 0) {
-    return SymMgr.getConjuredSymbol(expr, LCtx, visitCount, symbolTag);
+  const SymbolConjured* conjureSymbol(const Expr *expr,
+                                      const LocationContext *LCtx,
+                                      unsigned visitCount,
+                                      const void *symbolTag = 0) {
+    return SymMgr.conjureSymbol(expr, LCtx, visitCount, symbolTag);
   }
 
   /// Construct an SVal representing '0' for the specified type.
@@ -168,20 +169,20 @@ public:
   /// The advantage of symbols derived/built from other symbols is that we
   /// preserve the relation between related(or even equivalent) expressions, so
   /// conjured symbols should be used sparingly.
-  DefinedOrUnknownSVal getConjuredSymbolVal(const void *symbolTag,
-                                            const Expr *expr,
-                                            const LocationContext *LCtx,
-                                            unsigned count);
-  DefinedOrUnknownSVal getConjuredSymbolVal(const void *symbolTag,
-                                            const Expr *expr,
-                                            const LocationContext *LCtx,
-                                            QualType type,
-                                            unsigned count);
+  DefinedOrUnknownSVal conjureSymbolVal(const void *symbolTag,
+                                        const Expr *expr,
+                                        const LocationContext *LCtx,
+                                        unsigned count);
+  DefinedOrUnknownSVal conjureSymbolVal(const void *symbolTag,
+                                        const Expr *expr,
+                                        const LocationContext *LCtx,
+                                        QualType type,
+                                        unsigned count);
   
-  DefinedOrUnknownSVal getConjuredSymbolVal(const Stmt *stmt,
-                                            const LocationContext *LCtx,
-                                            QualType type,
-                                            unsigned visitCount);
+  DefinedOrUnknownSVal conjureSymbolVal(const Stmt *stmt,
+                                        const LocationContext *LCtx,
+                                        QualType type,
+                                        unsigned visitCount);
   /// \brief Conjure a symbol representing heap allocated memory region.
   ///
   /// Note, the expression should represent a location.
@@ -261,11 +262,6 @@ public:
         BasicVals.getIntWithPtrWidth(integer, isUnsigned));
   }
 
-  NonLoc makeIntVal(uint64_t integer, unsigned bitWidth, bool isUnsigned) {
-    return nonloc::ConcreteInt(
-        BasicVals.getValue(integer, bitWidth, isUnsigned));
-  }
-
   NonLoc makeLocAsInteger(Loc loc, unsigned bits) {
     return nonloc::LocAsInteger(BasicVals.getPersistentSValWithData(loc, bits));
   }
@@ -310,6 +306,13 @@ public:
     return loc::ConcreteInt(BasicVals.getValue(integer));
   }
 
+  /// Return a memory region for the 'this' object reference.
+  loc::MemRegionVal getCXXThis(const CXXMethodDecl *D,
+                               const StackFrameContext *SFC);
+
+  /// Return a memory region for the 'this' object reference.
+  loc::MemRegionVal getCXXThis(const CXXRecordDecl *D,
+                               const StackFrameContext *SFC);
 };
 
 SValBuilder* createSimpleSValBuilder(llvm::BumpPtrAllocator &alloc,

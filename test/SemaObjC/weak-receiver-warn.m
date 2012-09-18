@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -fobjc-runtime-has-weak -fobjc-arc -fblocks -Wreceiver-is-weak -verify %s
+// RUN: %clang_cc1 -fsyntax-only -fobjc-runtime-has-weak -fobjc-arc -fblocks -Wno-objc-root-class -Wreceiver-is-weak -verify %s
 // rdar://10225276
 
 @interface Test0
@@ -66,3 +66,15 @@ void test0(Test0 *x) {
 }
 
 @end
+
+
+// Weak properties on protocols can be synthesized by an adopting class.
+@protocol MyProtocol
+@property (weak) id object; // expected-note 2 {{property declared here}}
+@end
+
+void testProtocol(id <MyProtocol> input) {
+  [[input object] Meth]; // expected-warning {{weak property may be unpredictably null in ARC mode}}
+  [input.object Meth]; // expected-warning {{weak property may be unpredictably null in ARC mode}}
+}
+

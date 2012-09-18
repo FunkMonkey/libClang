@@ -79,15 +79,16 @@ llvm::Constant *CodeGenModule::GetAddrOfThunk(GlobalDecl GD,
 static llvm::Value *PerformTypeAdjustment(CodeGenFunction &CGF,
                                           llvm::Value *Ptr,
                                           int64_t NonVirtualAdjustment,
-                                          int64_t VirtualAdjustment) {
+                                          int64_t VirtualAdjustment,
+                                          bool IsReturnAdjustment) {
   if (!NonVirtualAdjustment && !VirtualAdjustment)
     return Ptr;
 
   llvm::Type *Int8PtrTy = CGF.Int8PtrTy;
   llvm::Value *V = CGF.Builder.CreateBitCast(Ptr, Int8PtrTy);
 
-  if (NonVirtualAdjustment) {
-    // Do the non-virtual adjustment.
+  if (NonVirtualAdjustment && !IsReturnAdjustment) {
+    // Perform the non-virtual adjustment for a base-to-derived cast.
     V = CGF.Builder.CreateConstInBoundsGEP1_64(V, NonVirtualAdjustment);
   }
 
@@ -95,7 +96,7 @@ static llvm::Value *PerformTypeAdjustment(CodeGenFunction &CGF,
     llvm::Type *PtrDiffTy = 
       CGF.ConvertType(CGF.getContext().getPointerDiffType());
 
-    // Do the virtual adjustment.
+    // Perform the virtual adjustment.
     llvm::Value *VTablePtrPtr = 
       CGF.Builder.CreateBitCast(V, Int8PtrTy->getPointerTo());
     
@@ -111,6 +112,11 @@ static llvm::Value *PerformTypeAdjustment(CodeGenFunction &CGF,
     
     // Adjust our pointer.
     V = CGF.Builder.CreateInBoundsGEP(V, Offset);
+  }
+
+  if (NonVirtualAdjustment && IsReturnAdjustment) {
+    // Perform the non-virtual adjustment for a derived-to-base cast.
+    V = CGF.Builder.CreateConstInBoundsGEP1_64(V, NonVirtualAdjustment);
   }
 
   // Cast back to the original type.
@@ -199,7 +205,8 @@ static RValue PerformReturnAdjustment(CodeGenFunction &CGF,
   
   ReturnValue = PerformTypeAdjustment(CGF, ReturnValue, 
                                       Thunk.Return.NonVirtual, 
-                                      Thunk.Return.VBaseOffsetOffset);
+                                      Thunk.Return.VBaseOffsetOffset,
+                                      /*IsReturnAdjustment*/true);
   
   if (NullCheckValue) {
     CGF.Builder.CreateBr(AdjustEnd);
@@ -281,7 +288,8 @@ void CodeGenFunction::GenerateVarArgsThunk(
   llvm::Value *AdjustedThisPtr = 
     PerformTypeAdjustment(*this, ThisPtr, 
                           Thunk.This.NonVirtual, 
-                          Thunk.This.VCallOffsetOffset);
+                          Thunk.This.VCallOffsetOffset,
+                          /*IsReturnAdjustment*/false);
   ThisStore->setOperand(0, AdjustedThisPtr);
 
   if (!Thunk.Return.isEmpty()) {
@@ -335,7 +343,8 @@ void CodeGenFunction::GenerateThunk(llvm::Function *Fn,
   llvm::Value *AdjustedThisPtr = 
     PerformTypeAdjustment(*this, LoadCXXThis(), 
                           Thunk.This.NonVirtual, 
-                          Thunk.This.VCallOffsetOffset);
+                          Thunk.This.VCallOffsetOffset,
+                          /*IsReturnAdjustment*/false);
   
   CallArgList CallArgs;
   
@@ -355,13 +364,14 @@ void CodeGenFunction::GenerateThunk(llvm::Function *Fn,
   llvm::Value *Callee = CGM.GetAddrOfFunction(GD, Ty, /*ForVTable=*/true);
 
 #ifndef NDEBUG
-  const CGFunctionInfo &CallFnInfo = 
-    CGM.getTypes().arrangeFunctionCall(ResultType, CallArgs, FPT->getExtInfo(),
+  const CGFunctionInfo &CallFnInfo =
+    CGM.getTypes().arrangeCXXMethodCall(CallArgs, FPT,
                                        RequiredArgs::forPrototypePlus(FPT, 1));
   assert(CallFnInfo.getRegParm() == FnInfo.getRegParm() &&
          CallFnInfo.isNoReturn() == FnInfo.isNoReturn() &&
          CallFnInfo.getCallingConvention() == FnInfo.getCallingConvention());
-  assert(similar(CallFnInfo.getReturnInfo(), CallFnInfo.getReturnType(),
+  assert(isa<CXXDestructorDecl>(MD) || // ignore dtor return types
+         similar(CallFnInfo.getReturnInfo(), CallFnInfo.getReturnType(),
                  FnInfo.getReturnInfo(), FnInfo.getReturnType()));
   assert(CallFnInfo.arg_size() == FnInfo.arg_size());
   for (unsigned i = 0, e = FnInfo.arg_size(); i != e; ++i)
@@ -385,6 +395,9 @@ void CodeGenFunction::GenerateThunk(llvm::Function *Fn,
 
   if (!ResultType->isVoidType() && Slot.isNull())
     CGM.getCXXABI().EmitReturnFromThunk(*this, RV, ResultType);
+
+  // Disable the final ARC autorelease.
+  AutoreleaseResult = false;
 
   FinishFunction();
 
@@ -571,12 +584,11 @@ CodeGenVTables::CreateVTableInitializer(const CXXRecordDecl *RD,
         if (!PureVirtualFn) {
           llvm::FunctionType *Ty = 
             llvm::FunctionType::get(CGM.VoidTy, /*isVarArg=*/false);
-          PureVirtualFn = 
-            CGM.CreateRuntimeFunction(Ty, "__cxa_pure_virtual");
-          PureVirtualFn = llvm::ConstantExpr::getBitCast(PureVirtualFn, 
-                                                         Int8PtrTy);
+          StringRef PureCallName = CGM.getCXXABI().GetPureVirtualCallName();
+          PureVirtualFn = CGM.CreateRuntimeFunction(Ty, PureCallName);
+          PureVirtualFn = llvm::ConstantExpr::getBitCast(PureVirtualFn,
+                                                         CGM.Int8PtrTy);
         }
-        
         Init = PureVirtualFn;
       } else {
         // Check if we should use a thunk.

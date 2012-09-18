@@ -28,9 +28,6 @@ namespace sema {
 /// deduction, whose success or failure was described by a
 /// TemplateDeductionResult value.
 class TemplateDeductionInfo {
-  /// \brief The context in which the template arguments are stored.
-  ASTContext &Context;
-
   /// \brief The deduced template argument list.
   ///
   TemplateArgumentList *Deduced;
@@ -46,13 +43,12 @@ class TemplateDeductionInfo {
   /// SFINAE while performing template argument deduction.
   SmallVector<PartialDiagnosticAt, 4> SuppressedDiagnostics;
 
-  // do not implement these
-  TemplateDeductionInfo(const TemplateDeductionInfo&);
-  TemplateDeductionInfo &operator=(const TemplateDeductionInfo&);
+  TemplateDeductionInfo(const TemplateDeductionInfo &) LLVM_DELETED_FUNCTION;
+  void operator=(const TemplateDeductionInfo &) LLVM_DELETED_FUNCTION;
 
 public:
   TemplateDeductionInfo(ASTContext &Context, SourceLocation Loc)
-    : Context(Context), Deduced(0), Loc(Loc), HasSFINAEDiagnostic(false) { }
+    : Deduced(0), Loc(Loc), HasSFINAEDiagnostic(false) { }
 
   ~TemplateDeductionInfo() {
     // FIXME: if (Deduced) Deduced->Destroy(Context);

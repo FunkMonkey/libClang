@@ -18,6 +18,9 @@ def w_asm_qualifier_ignored : Warning<"ignored %0 qualifier on asm">,
 def warn_file_asm_volatile : Warning<
   "meaningless 'volatile' on asm outside function">, CatInlineAsm;
 
+def warn_unsupported_msasm : Warning<
+  "MS-style inline assembly is not supported">, InGroup<Microsoft>;
+
 let CategoryName = "Parse Issue" in {
 
 def ext_empty_translation_unit : Extension<
@@ -31,10 +34,19 @@ def ext_extra_semi : Extension<
   "outside of a function|"
   "inside a %1|"
   "inside instance variable list|"
-  "after function definition}0">,
-  InGroup<DiagGroup<"extra-semi">>;
+  "after member function definition}0">,
+  InGroup<ExtraSemi>;
+def ext_extra_semi_cxx11 : Extension<
+  "extra ';' outside of a function is a C++11 extension">,
+  InGroup<CXX11ExtraSemi>;
+def warn_extra_semi_after_mem_fn_def : Warning<
+  "extra ';' after member function definition">,
+  InGroup<ExtraSemi>, DefaultIgnore;
 
-def ext_duplicate_declspec : Extension<"duplicate '%0' declaration specifier">;
+def ext_duplicate_declspec : ExtWarn<"duplicate '%0' declaration specifier">,
+  InGroup<DuplicateDeclSpecifier>;
+def warn_duplicate_declspec : Warning<"duplicate '%0' declaration specifier">,
+  InGroup<DuplicateDeclSpecifier>;
 def ext_plain_complex : ExtWarn<
   "plain '_Complex' requires a type specifier; assuming '_Complex double'">;
 def ext_integer_complex : Extension<
@@ -61,9 +73,12 @@ def ext_c99_compound_literal : Extension<
   "compound literals are a C99-specific feature">, InGroup<C99>;
 def ext_c99_flexible_array_member : Extension<
   "Flexible array members are a C99-specific feature">, InGroup<C99>;
-def ext_enumerator_list_comma : Extension<
-  "commas at the end of enumerator lists are a %select{C99|C++11}0-specific "
-  "feature">;
+def ext_enumerator_list_comma_c : Extension<
+  "commas at the end of enumerator lists are a C99-specific "
+  "feature">, InGroup<C99>;
+def ext_enumerator_list_comma_cxx : Extension<
+  "commas at the end of enumerator lists are a C++11 extension">,
+  InGroup<CXX11>;
 def warn_cxx98_compat_enumerator_list_comma : Warning<
   "commas at the end of enumerator lists are incompatible with C++98">,
   InGroup<CXX98CompatPedantic>, DefaultIgnore;
@@ -92,8 +107,8 @@ def err_duplicate_default_assoc : Error<
 def note_previous_default_assoc : Note<
   "previous default generic association is here">;
 
-def ext_c11_alignas : Extension<
-  "_Alignas is a C11-specific feature">, InGroup<C11>;
+def ext_c11_alignment : Extension<
+  "%0 is a C11-specific feature">, InGroup<C11>;
 
 def ext_gnu_indirect_goto : Extension<
   "use of GNU indirect-goto extension">, InGroup<GNU>;
@@ -198,6 +213,17 @@ def err_expected_semi_after_static_assert : Error<
   "expected ';' after static_assert">;
 def err_expected_semi_for : Error<"expected ';' in 'for' statement specifier">;
 def err_expected_colon_after : Error<"expected ':' after %0">;
+def warn_missing_selector_name : Warning<
+  "%0 used as the name of the previous parameter rather than as part "
+  "of the selector">,
+  InGroup<DiagGroup<"missing-selector-name">>;
+def note_missing_selector_name : Note<
+  "introduce a parameter name to make %0 part of the selector">;
+def note_force_empty_selector_name : Note<
+  "or insert whitespace before ':' to use %0 as parameter name "
+  "and have an empty entry in the selector">;
+def note_missing_argument_name : Note<
+  "did you mean to use %0 as the selector name instead of %1">;
 def err_label_end_of_compound_statement : Error<
   "label at end of compound statement: expected statement">;
 def err_address_of_label_outside_fn : Error<
@@ -339,6 +365,9 @@ def err_illegal_super_cast : Error<
   "cannot cast 'super' (it isn't an expression)">;
 def err_nsnumber_nonliteral_unary : Error<
   "@%0 must be followed by a number to form an NSNumber object">;
+def warn_cstyle_param : Warning<
+  "use of C-style parameters in Objective-C method declarations"
+  " is deprecated">, InGroup<DeprecatedDeclarations>;
 
 let CategoryName = "ARC Parse Issue" in {
 def err_arc_bridge_retain : Error<
@@ -381,7 +410,7 @@ def warn_semicolon_before_method_body : Warning<
   "semicolon before method body is ignored">,
   InGroup<DiagGroup<"semicolon-before-method-body">>, DefaultIgnore;
 def note_extra_comma_message_arg : Note<
-  "comma separating objective-c messaging arguments">;
+  "comma separating Objective-C messaging arguments">;
 
 def err_expected_field_designator : Error<
   "expected a field designator, such as '.field = 4'">;
@@ -403,9 +432,6 @@ def err_expected_init_in_condition_lparen : Error<
   "variable declaration in condition cannot have a parenthesized initializer">;
 def err_extraneous_rparen_in_condition : Error<
   "extraneous ')' after condition, expected a statement">;
-def warn_parens_disambiguated_as_function_decl : Warning<
-  "parentheses were disambiguated as a function declarator">,
-  InGroup<VexingParse>;
 def warn_dangling_else : Warning<
   "add explicit braces to avoid dangling else">,
   InGroup<DanglingElse>;
@@ -481,6 +507,10 @@ def err_l_square_l_square_not_attribute : Error<
   "introducing an attribute">;
 def err_alignas_pack_exp_unsupported : Error<
   "pack expansions in alignment specifiers are not supported yet">;
+def err_ms_declspec_type : Error<
+  "__declspec attributes must be an identifier or string literal">;
+def warn_ms_declspec_unknown : Warning<
+  "unknown __declspec attribute %0 ignored">, InGroup<UnknownAttributes>;
 
 /// C++ Templates
 def err_expected_template : Error<"expected template">;
@@ -498,6 +528,9 @@ def err_id_after_template_in_nested_name_spec : Error<
   "expected template name after 'template' keyword in nested name specifier">;
 def err_two_right_angle_brackets_need_space : Error<
   "a space is required between consecutive right angle brackets (use '> >')">;
+def err_right_angle_bracket_equal_needs_space : Error<
+  "a space is required between a right angle bracket and an equals sign "
+  "(use '> =')">;
 def warn_cxx0x_right_shift_in_template_arg : Warning<
   "use of right-shift operator ('>>') in template argument will require "
   "parentheses in C++11">, InGroup<CXX11Compat>;
@@ -554,7 +587,7 @@ def err_expected_type_name_after_typename : Error<
   "expected an identifier or template-id after '::'">;
 def err_explicit_spec_non_template : Error<
   "explicit %select{specialization|instantiation}0 of non-template "
-  "%select{class|struct|union}1 %2">;
+  "%select{class|struct|union|interface}1 %2">;
   
 def err_default_template_template_parameter_not_template : Error<
   "default template argument for a template template parameter must be a class "
@@ -660,6 +693,10 @@ def err_availability_redundant : Error<
 def warn_availability_and_unavailable : Warning<
   "'unavailable' availability overrides all other availability information">,
   InGroup<Availability>;
+
+// Type safety attributes
+def err_type_safety_unknown_flag : Error<
+  "invalid comparison flag %0; use 'layout_compatible' or 'must_be_null'">;
 
 // Language specific pragmas
 // - Generic warnings

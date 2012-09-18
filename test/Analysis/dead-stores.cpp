@@ -1,5 +1,4 @@
 // RUN: %clang_cc1 -fcxx-exceptions -fexceptions -analyze -analyzer-checker=deadcode.DeadStores -verify -Wno-unreachable-code %s
-// RUN: %clang_cc1 -fcxx-exceptions -fexceptions -analyze -analyzer-store=region -analyzer-constraints=basic -analyzer-checker=deadcode.DeadStores -verify -Wno-unreachable-code %s
 // RUN: %clang_cc1 -fcxx-exceptions -fexceptions -analyze -analyzer-store=region -analyzer-constraints=range -analyzer-checker=deadcode.DeadStores -verify -Wno-unreachable-code %s
 
 //===----------------------------------------------------------------------===//
@@ -108,5 +107,22 @@ namespace foo {
     x = 2;
     return x;
   }
+}
+
+//===----------------------------------------------------------------------===//
+// Dead stores in with EH code.
+//===----------------------------------------------------------------------===//
+
+void test_5_Aux();
+int test_5() {
+  int x = 0;
+  try {
+    x = 2; // no-warning
+    test_5_Aux();
+  }
+  catch (int z) {
+    return x + z;
+  }
+  return 1;
 }
 

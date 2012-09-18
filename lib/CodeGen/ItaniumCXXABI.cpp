@@ -20,13 +20,14 @@
 
 #include "CGCXXABI.h"
 #include "CGRecordLayout.h"
+#include "CGVTables.h"
 #include "CodeGenFunction.h"
 #include "CodeGenModule.h"
-#include <clang/AST/Mangle.h>
-#include <clang/AST/Type.h>
-#include <llvm/Intrinsics.h>
-#include <llvm/Target/TargetData.h>
-#include <llvm/Value.h>
+#include "clang/AST/Mangle.h"
+#include "clang/AST/Type.h"
+#include "llvm/Intrinsics.h"
+#include "llvm/Target/TargetData.h"
+#include "llvm/Value.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -107,6 +108,8 @@ public:
 
   void EmitInstanceFunctionProlog(CodeGenFunction &CGF);
 
+  StringRef GetPureVirtualCallName() { return "__cxa_pure_virtual"; }
+
   CharUnits getArrayCookieSizeImpl(QualType elementType);
   llvm::Value *InitializeArrayCookie(CodeGenFunction &CGF,
                                      llvm::Value *NewPtr,
@@ -121,6 +124,8 @@ public:
                        llvm::GlobalVariable *DeclPtr, bool PerformInit);
   void registerGlobalDtor(CodeGenFunction &CGF, llvm::Constant *dtor,
                           llvm::Constant *addr);
+
+  void EmitVTables(const CXXRecordDecl *Class);
 };
 
 class ARMCXXABI : public ItaniumCXXABI {
@@ -1150,4 +1155,9 @@ void ItaniumCXXABI::registerGlobalDtor(CodeGenFunction &CGF,
   }
 
   CGF.registerGlobalDtorWithAtExit(dtor, addr);
+}
+
+/// Generate and emit virtual tables for the given class.
+void ItaniumCXXABI::EmitVTables(const CXXRecordDecl *Class) {
+  CGM.getVTables().GenerateClassData(CGM.getVTableLinkage(Class), Class);
 }

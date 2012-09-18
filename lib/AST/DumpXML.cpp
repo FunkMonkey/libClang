@@ -778,7 +778,6 @@ struct XMLDumper : public XMLDeclVisitor<XMLDumper>,
   // ObjCCategoryDecl
   void visitObjCCategoryDeclAttrs(ObjCCategoryDecl *D) {
     setFlag("extension", D->IsClassExtension());
-    setFlag("synth_bitfield", D->hasSynthBitfield());
   }
   void visitObjCCategoryDeclChildren(ObjCCategoryDecl *D) {
     visitDeclRef("interface", D->getClassInterface());
@@ -804,7 +803,6 @@ struct XMLDumper : public XMLDeclVisitor<XMLDumper>,
 
   // ObjCImplementationDecl
   void visitObjCImplementationDeclAttrs(ObjCImplementationDecl *D) {
-    setFlag("synth_bitfield", D->hasSynthBitfield());
     set("identifier", D->getName());
   }
   void visitObjCImplementationDeclChildren(ObjCImplementationDecl *D) {
@@ -973,9 +971,9 @@ struct XMLDumper : public XMLDeclVisitor<XMLDumper>,
   }
 
   void visitFunctionProtoTypeAttrs(FunctionProtoType *T) {
-    setFlag("const", T->getTypeQuals() & Qualifiers::Const);
-    setFlag("volatile", T->getTypeQuals() & Qualifiers::Volatile);
-    setFlag("restrict", T->getTypeQuals() & Qualifiers::Restrict);
+    setFlag("const", T->isConst());
+    setFlag("volatile", T->isVolatile());
+    setFlag("restrict", T->isRestrict());
   }
   void visitFunctionProtoTypeChildren(FunctionProtoType *T) {
     push("parameters");

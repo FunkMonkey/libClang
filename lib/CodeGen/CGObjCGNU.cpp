@@ -99,8 +99,8 @@ class LazyRuntimeFunction {
 
 
 /// GNU Objective-C runtime code generation.  This class implements the parts of
-/// Objective-C support that are specific to the GNU family of runtimes (GCC and
-/// GNUstep).
+/// Objective-C support that are specific to the GNU family of runtimes (GCC,
+/// GNUstep and ObjFW).
 class CGObjCGNU : public CGObjCRuntime {
 protected:
   /// The LLVM module into which output is inserted
@@ -292,8 +292,8 @@ private:
 protected:
   /// Function used for throwing Objective-C exceptions.
   LazyRuntimeFunction ExceptionThrowFn;
-  /// Function used for rethrowing exceptions, used at the end of @finally or
-  /// @synchronize blocks.
+  /// Function used for rethrowing exceptions, used at the end of \@finally or
+  /// \@synchronize blocks.
   LazyRuntimeFunction ExceptionReThrowFn;
   /// Function called when entering a catch function.  This is required for
   /// differentiating Objective-C exceptions and foreign exceptions.
@@ -301,9 +301,9 @@ protected:
   /// Function called when exiting from a catch block.  Used to do exception
   /// cleanup.
   LazyRuntimeFunction ExitCatchFn;
-  /// Function called when entering an @synchronize block.  Acquires the lock.
+  /// Function called when entering an \@synchronize block.  Acquires the lock.
   LazyRuntimeFunction SyncEnterFn;
-  /// Function called when exiting an @synchronize block.  Releases the lock.
+  /// Function called when exiting an \@synchronize block.  Releases the lock.
   LazyRuntimeFunction SyncExitFn;
 
 private:
@@ -350,7 +350,7 @@ private:
       ArrayRef<Selector> MethodSels,
       ArrayRef<llvm::Constant *> MethodTypes,
       bool isClassMethodList);
-  /// Emits an empty protocol.  This is used for @protocol() where no protocol
+  /// Emits an empty protocol.  This is used for \@protocol() where no protocol
   /// is found.  The runtime will (hopefully) fix up the pointer to refer to the
   /// real protocol.
   llvm::Constant *GenerateEmptyProtocol(const std::string &ProtocolName);
@@ -397,11 +397,11 @@ private:
       const ObjCIvarDecl *Ivar);
   /// Emits a reference to a class.  This allows the linker to object if there
   /// is no class of the matching name.
+protected:
   void EmitClassRef(const std::string &className);
   /// Emits a pointer to the named class
-  llvm::Value *GetClassNamed(CGBuilderTy &Builder, const std::string &Name,
-                             bool isWeak);
-protected:
+  virtual llvm::Value *GetClassNamed(CGBuilderTy &Builder,
+                                     const std::string &Name, bool isWeak);
   /// Looks up the method for sending a message to the specified object.  This
   /// mechanism differs between the GCC and GNU runtimes, so this method must be
   /// overridden in subclasses.
@@ -653,6 +653,68 @@ class CGObjCGNUstep : public CGObjCGNU {
     }
 };
 
+/// Support for the ObjFW runtime. Support here is due to
+/// Jonathan Schleifer <js@webkeks.org>, the ObjFW maintainer.
+class CGObjCObjFW: public CGObjCGNU {
+protected:
+  /// The GCC ABI message lookup function.  Returns an IMP pointing to the
+  /// method implementation for this message.
+  LazyRuntimeFunction MsgLookupFn;
+  /// The GCC ABI superclass message lookup function.  Takes a pointer to a
+  /// structure describing the receiver and the class, and a selector as
+  /// arguments.  Returns the IMP for the corresponding method.
+  LazyRuntimeFunction MsgLookupSuperFn;
+
+  virtual llvm::Value *LookupIMP(CodeGenFunction &CGF,
+                                 llvm::Value *&Receiver,
+                                 llvm::Value *cmd,
+                                 llvm::MDNode *node) {
+    CGBuilderTy &Builder = CGF.Builder;
+    llvm::Value *args[] = {
+            EnforceType(Builder, Receiver, IdTy),
+            EnforceType(Builder, cmd, SelectorTy) };
+    llvm::CallSite imp = CGF.EmitCallOrInvoke(MsgLookupFn, args);
+    imp->setMetadata(msgSendMDKind, node);
+    return imp.getInstruction();
+  }
+
+  virtual llvm::Value *LookupIMPSuper(CodeGenFunction &CGF,
+                                      llvm::Value *ObjCSuper,
+                                      llvm::Value *cmd) {
+      CGBuilderTy &Builder = CGF.Builder;
+      llvm::Value *lookupArgs[] = {EnforceType(Builder, ObjCSuper,
+          PtrToObjCSuperTy), cmd};
+      return Builder.CreateCall(MsgLookupSuperFn, lookupArgs);
+    }
+
+  virtual llvm::Value *GetClassNamed(CGBuilderTy &Builder,
+                                     const std::string &Name, bool isWeak) {
+    if (isWeak)
+      return CGObjCGNU::GetClassNamed(Builder, Name, isWeak);
+
+    EmitClassRef(Name);
+
+    std::string SymbolName = "_OBJC_CLASS_" + Name;
+
+    llvm::GlobalVariable *ClassSymbol = TheModule.getGlobalVariable(SymbolName);
+
+    if (!ClassSymbol)
+      ClassSymbol = new llvm::GlobalVariable(TheModule, LongTy, false,
+                                             llvm::GlobalValue::ExternalLinkage,
+                                             0, SymbolName);
+
+    return ClassSymbol;
+  }
+
+public:
+  CGObjCObjFW(CodeGenModule &Mod): CGObjCGNU(Mod, 9, 3) {
+    // IMP objc_msg_lookup(id, SEL);
+    MsgLookupFn.init(&CGM, "objc_msg_lookup", IMPTy, IdTy, SelectorTy, NULL);
+    // IMP objc_msg_lookup_super(struct objc_super*, SEL);
+    MsgLookupSuperFn.init(&CGM, "objc_msg_lookup_super", IMPTy,
+                          PtrToObjCSuperTy, SelectorTy, NULL);
+  }
+};
 } // end anonymous namespace
 
 
@@ -889,7 +951,7 @@ llvm::Constant *CGObjCGNU::GetEHType(QualType T) {
         // foreign exceptions.  With the new ABI, we use __objc_id_typeinfo as
         // a pointer indicating object catchalls, and NULL to indicate real
         // catchalls
-        if (CGM.getLangOpts().ObjCNonFragileABI) {
+        if (CGM.getLangOpts().ObjCRuntime.isNonFragile()) {
           return MakeConstantString("@id");
         } else {
           return 0;
@@ -1568,13 +1630,13 @@ void CGObjCGNU::GenerateProtocol(const ObjCProtocolDecl *PD) {
     std::string TypeStr;
     Context.getObjCEncodingForMethodDecl(*iter, TypeStr);
     if ((*iter)->getImplementationControl() == ObjCMethodDecl::Optional) {
-      InstanceMethodNames.push_back(
-          MakeConstantString((*iter)->getSelector().getAsString()));
-      InstanceMethodTypes.push_back(MakeConstantString(TypeStr));
-    } else {
       OptionalInstanceMethodNames.push_back(
           MakeConstantString((*iter)->getSelector().getAsString()));
       OptionalInstanceMethodTypes.push_back(MakeConstantString(TypeStr));
+    } else {
+      InstanceMethodNames.push_back(
+          MakeConstantString((*iter)->getSelector().getAsString()));
+      InstanceMethodTypes.push_back(MakeConstantString(TypeStr));
     }
   }
   // Collect information about class methods:
@@ -1588,13 +1650,13 @@ void CGObjCGNU::GenerateProtocol(const ObjCProtocolDecl *PD) {
     std::string TypeStr;
     Context.getObjCEncodingForMethodDecl((*iter),TypeStr);
     if ((*iter)->getImplementationControl() == ObjCMethodDecl::Optional) {
-      ClassMethodNames.push_back(
-          MakeConstantString((*iter)->getSelector().getAsString()));
-      ClassMethodTypes.push_back(MakeConstantString(TypeStr));
-    } else {
       OptionalClassMethodNames.push_back(
           MakeConstantString((*iter)->getSelector().getAsString()));
       OptionalClassMethodTypes.push_back(MakeConstantString(TypeStr));
+    } else {
+      ClassMethodNames.push_back(
+          MakeConstantString((*iter)->getSelector().getAsString()));
+      ClassMethodTypes.push_back(MakeConstantString(TypeStr));
     }
   }
 
@@ -1984,7 +2046,7 @@ void CGObjCGNU::GenerateClass(const ObjCImplementationDecl *OID) {
     Context.getASTObjCInterfaceLayout(SuperClassDecl).getSize().getQuantity();
   // For non-fragile ivars, set the instance size to 0 - {the size of just this
   // class}.  The runtime will then set this to the correct value on load.
-  if (CGM.getContext().getLangOpts().ObjCNonFragileABI) {
+  if (CGM.getContext().getLangOpts().ObjCRuntime.isNonFragile()) {
     instanceSize = 0 - (instanceSize - superInstanceSize);
   }
 
@@ -1999,7 +2061,7 @@ void CGObjCGNU::GenerateClass(const ObjCImplementationDecl *OID) {
       // Get the offset
       uint64_t BaseOffset = ComputeIvarBaseOffset(CGM, OID, IVD);
       uint64_t Offset = BaseOffset;
-      if (CGM.getContext().getLangOpts().ObjCNonFragileABI) {
+      if (CGM.getContext().getLangOpts().ObjCRuntime.isNonFragile()) {
         Offset = BaseOffset - superInstanceSize;
       }
       llvm::Constant *OffsetValue = llvm::ConstantInt::get(IntTy, Offset);
@@ -2486,25 +2548,8 @@ void CGObjCGNU::EmitThrowStmt(CodeGenFunction &CGF,
     ExceptionAsObject = CGF.ObjCEHValueStack.back();
   }
   ExceptionAsObject = CGF.Builder.CreateBitCast(ExceptionAsObject, IdTy);
-
-  // Note: This may have to be an invoke, if we want to support constructs like:
-  // @try {
-  //  @throw(obj);
-  // }
-  // @catch(id) ...
-  //
-  // This is effectively turning @throw into an incredibly-expensive goto, but
-  // it may happen as a result of inlining followed by missed optimizations, or
-  // as a result of stupidity.
-  llvm::BasicBlock *UnwindBB = CGF.getInvokeDest();
-  if (!UnwindBB) {
-    CGF.Builder.CreateCall(ExceptionThrowFn, ExceptionAsObject);
-    CGF.Builder.CreateUnreachable();
-  } else {
-    CGF.Builder.CreateInvoke(ExceptionThrowFn, UnwindBB, UnwindBB,
-                             ExceptionAsObject);
-  }
-  // Clear the insertion point to indicate we are in unreachable code.
+  CGF.EmitCallOrInvoke(ExceptionThrowFn, ExceptionAsObject);
+  CGF.Builder.CreateUnreachable();
   CGF.Builder.ClearInsertionPoint();
 }
 
@@ -2640,7 +2685,7 @@ static const ObjCInterfaceDecl *FindIvarInterface(ASTContext &Context,
 llvm::Value *CGObjCGNU::EmitIvarOffset(CodeGenFunction &CGF,
                          const ObjCInterfaceDecl *Interface,
                          const ObjCIvarDecl *Ivar) {
-  if (CGM.getLangOpts().ObjCNonFragileABI) {
+  if (CGM.getLangOpts().ObjCRuntime.isNonFragile()) {
     Interface = FindIvarInterface(CGM.getContext(), Interface, Ivar);
     if (RuntimeVersion < 10)
       return CGF.Builder.CreateZExtOrBitCast(
@@ -2665,7 +2710,20 @@ llvm::Value *CGObjCGNU::EmitIvarOffset(CodeGenFunction &CGF,
 
 CGObjCRuntime *
 clang::CodeGen::CreateGNUObjCRuntime(CodeGenModule &CGM) {
-  if (CGM.getLangOpts().ObjCNonFragileABI)
+  switch (CGM.getLangOpts().ObjCRuntime.getKind()) {
+  case ObjCRuntime::GNUstep:
     return new CGObjCGNUstep(CGM);
-  return new CGObjCGCC(CGM);
+
+  case ObjCRuntime::GCC:
+    return new CGObjCGCC(CGM);
+
+  case ObjCRuntime::ObjFW:
+    return new CGObjCObjFW(CGM);
+
+  case ObjCRuntime::FragileMacOSX:
+  case ObjCRuntime::MacOSX:
+  case ObjCRuntime::iOS:
+    llvm_unreachable("these runtimes are not GNU runtimes");
+  }
+  llvm_unreachable("bad runtime");
 }

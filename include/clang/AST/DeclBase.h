@@ -857,7 +857,10 @@ public:
   static void printGroup(Decl** Begin, unsigned NumDecls,
                          raw_ostream &Out, const PrintingPolicy &Policy,
                          unsigned Indentation = 0);
+  // Debuggers don't usually respect default arguments.
   LLVM_ATTRIBUTE_USED void dump() const;
+  void dump(raw_ostream &Out) const;
+  // Debuggers don't usually respect default arguments.
   LLVM_ATTRIBUTE_USED void dumpXML() const;
   void dumpXML(raw_ostream &OS) const;
 
@@ -1142,7 +1145,7 @@ public:
   /// inline, its enclosing namespace, recursively.
   bool InEnclosingNamespaceSetOf(const DeclContext *NS) const;
 
-  /// \\brief Collects all of the declaration contexts that are semantically
+  /// \brief Collects all of the declaration contexts that are semantically
   /// connected to this declaration context.
   ///
   /// For declaration contexts that have multiple semantically connected but
@@ -1476,6 +1479,13 @@ public:
   inline ddiag_iterator ddiag_end() const;
 
   // Low-level accessors
+    
+  /// \brief Mark the lookup table as needing to be built.  This should be
+  /// used only if setHasExternalLexicalStorage() has been called.
+  void setMustBuildLookupTable() {
+    assert(ExternalLexicalStorage && "Requires external lexical storage");
+    LookupPtr.setInt(true);
+  }
 
   /// \brief Retrieve the internal representation of the lookup structure.
   /// This may omit some names if we are lazily building the structure.

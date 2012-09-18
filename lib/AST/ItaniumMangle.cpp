@@ -693,9 +693,10 @@ void CXXNameMangler::mangleFloat(const llvm::APFloat &f) {
 void CXXNameMangler::mangleNumber(const llvm::APSInt &Value) {
   if (Value.isSigned() && Value.isNegative()) {
     Out << 'n';
-    Value.abs().print(Out, true);
-  } else
-    Value.print(Out, Value.isSigned());
+    Value.abs().print(Out, /*signed*/ false);
+  } else {
+    Value.print(Out, /*signed*/ false);
+  }
 }
 
 void CXXNameMangler::mangleNumber(int64_t Number) {
@@ -2808,7 +2809,15 @@ recurse:
     // };
     Out << "_SUBSTPACK_";
     break;
-      
+
+  case Expr::FunctionParmPackExprClass: {
+    // FIXME: not clear how to mangle this!
+    const FunctionParmPackExpr *FPPE = cast<FunctionParmPackExpr>(E);
+    Out << "v110_SUBSTPACK";
+    mangleFunctionParam(FPPE->getParameterPack());
+    break;
+  }
+
   case Expr::DependentScopeDeclRefExprClass: {
     const DependentScopeDeclRefExpr *DRE = cast<DependentScopeDeclRefExpr>(E);
     mangleUnresolvedName(DRE->getQualifier(), 0, DRE->getDeclName(), Arity);

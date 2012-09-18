@@ -198,6 +198,8 @@ void ASTTypeWriter::VisitFunctionProtoType(const FunctionProtoType *T) {
   } else if (T->getExceptionSpecType() == EST_Uninstantiated) {
     Writer.AddDeclRef(T->getExceptionSpecDecl(), Record);
     Writer.AddDeclRef(T->getExceptionSpecTemplate(), Record);
+  } else if (T->getExceptionSpecType() == EST_Unevaluated) {
+    Writer.AddDeclRef(T->getExceptionSpecDecl(), Record);
   }
   Code = TYPE_FUNCTION_PROTO;
 }
@@ -484,7 +486,6 @@ void TypeLocWriter::VisitExtVectorTypeLoc(ExtVectorTypeLoc TL) {
 void TypeLocWriter::VisitFunctionTypeLoc(FunctionTypeLoc TL) {
   Writer.AddSourceLocation(TL.getLocalRangeBegin(), Record);
   Writer.AddSourceLocation(TL.getLocalRangeEnd(), Record);
-  Record.push_back(TL.getTrailingReturn());
   for (unsigned i = 0, e = TL.getNumArgs(); i != e; ++i)
     Writer.AddDeclRef(TL.getArg(i), Record);
 }
@@ -666,7 +667,8 @@ static void AddStmtsExprs(llvm::BitstreamWriter &Stream,
   RECORD(STMT_BREAK);
   RECORD(STMT_RETURN);
   RECORD(STMT_DECL);
-  RECORD(STMT_ASM);
+  RECORD(STMT_GCCASM);
+  RECORD(STMT_MSASM);
   RECORD(EXPR_PREDEFINED);
   RECORD(EXPR_DECL_REF);
   RECORD(EXPR_INTEGER_LITERAL);
@@ -1081,6 +1083,9 @@ void ASTWriter::WriteLanguageOptions(const LangOptions &LangOpts) {
 #define ENUM_LANGOPT(Name, Type, Bits, Default, Description) \
   Record.push_back(static_cast<unsigned>(LangOpts.get##Name()));
 #include "clang/Basic/LangOptions.def"  
+
+  Record.push_back((unsigned) LangOpts.ObjCRuntime.getKind());
+  AddVersionTuple(LangOpts.ObjCRuntime.getVersion(), Record);
   
   Record.push_back(LangOpts.CurrentModule.size());
   Record.append(LangOpts.CurrentModule.begin(), LangOpts.CurrentModule.end());
@@ -1325,8 +1330,6 @@ namespace {
 /// \brief Write the header search block for the list of files that 
 ///
 /// \param HS The header search structure to save.
-///
-/// \param Chain Whether we're creating a chained AST file.
 void ASTWriter::WriteHeaderSearch(const HeaderSearch &HS, StringRef isysroot) {
   SmallVector<const FileEntry *, 16> FilesByUID;
   HS.getFileMgr().GetUniqueIDMapping(FilesByUID);
@@ -1604,11 +1607,11 @@ void ASTWriter::WriteSourceManagerBlock(SourceManager &SourceMgr,
     for (LineTableInfo::iterator L = LineTable.begin(), LEnd = LineTable.end();
          L != LEnd; ++L) {
       // Only emit entries for local files.
-      if (L->first < 0)
+      if (L->first.ID < 0)
         continue;
 
       // Emit the file ID
-      Record.push_back(L->first);
+      Record.push_back(L->first.ID);
 
       // Emit the line entries
       Record.push_back(L->second.size());
@@ -1674,10 +1677,12 @@ void ASTWriter::WritePreprocessor(const Preprocessor &PP, bool IsModule) {
   for (Preprocessor::macro_iterator I = PP.macro_begin(Chain == 0), 
                                     E = PP.macro_end(Chain == 0);
        I != E; ++I) {
-    const IdentifierInfo *Name = I->first;
-    if (!IsModule || I->second->isPublic()) {
-      MacroDefinitionsSeen.insert(Name);
-      MacrosToEmit.push_back(std::make_pair(I->first, I->second));
+    // FIXME: We'll need to store macro history in PCH.
+    if (I->first->hasMacroDefinition()) {
+      if (!IsModule || I->second->isPublic()) {
+        MacroDefinitionsSeen.insert(I->first);
+        MacrosToEmit.push_back(std::make_pair(I->first, I->second));
+      }
     }
   }
   
@@ -2238,6 +2243,23 @@ void ASTWriter::WriteFileDeclIDsMap() {
   unsigned AbbrevCode = Stream.EmitAbbrev(Abbrev);
   Record.push_back(FILE_SORTED_DECLS);
   Stream.EmitRecordWithBlob(AbbrevCode, Record, data(FileSortedIDs));
+}
+
+void ASTWriter::WriteComments() {
+  Stream.EnterSubblock(COMMENTS_BLOCK_ID, 3);
+  ArrayRef<RawComment *> RawComments = Context->Comments.getComments();
+  RecordData Record;
+  for (ArrayRef<RawComment *>::iterator I = RawComments.begin(),
+                                        E = RawComments.end();
+       I != E; ++I) {
+    Record.clear();
+    AddSourceRange((*I)->getSourceRange(), Record);
+    Record.push_back((*I)->getKind());
+    Record.push_back((*I)->isTrailingComment());
+    Record.push_back((*I)->isAlmostTrailingComment());
+    Stream.EmitRecord(COMMENTS_RAW_COMMENT, Record);
+  }
+  Stream.ExitBlock();
 }
 
 //===----------------------------------------------------------------------===//
@@ -3066,10 +3088,12 @@ void ASTWriter::WriteMergedDecls() {
 //===----------------------------------------------------------------------===//
 
 /// \brief Write a record containing the given attributes.
-void ASTWriter::WriteAttributes(const AttrVec &Attrs, RecordDataImpl &Record) {
+void ASTWriter::WriteAttributes(ArrayRef<const Attr*> Attrs,
+                                RecordDataImpl &Record) {
   Record.push_back(Attrs.size());
-  for (AttrVec::const_iterator i = Attrs.begin(), e = Attrs.end(); i != e; ++i){
-    const Attr * A = *i;
+  for (ArrayRef<const Attr *>::iterator i = Attrs.begin(),
+                                        e = Attrs.end(); i != e; ++i){
+    const Attr *A = *i;
     Record.push_back(A->getKind()); // FIXME: stable encoding, target attrs
     AddSourceRange(A->getRange(), Record);
 
@@ -3120,7 +3144,8 @@ void ASTWriter::SetSelectorOffset(Selector Sel, uint32_t Offset) {
 
 ASTWriter::ASTWriter(llvm::BitstreamWriter &Stream)
   : Stream(Stream), Context(0), PP(0), Chain(0), WritingModule(0),
-    WritingAST(false), ASTHasCompilerErrors(false),
+    WritingAST(false), DoneWritingDeclsAndTypes(false),
+    ASTHasCompilerErrors(false),
     FirstDeclID(NUM_PREDEF_DECL_IDS), NextDeclID(FirstDeclID),
     FirstTypeID(NUM_PREDEF_TYPE_IDS), NextTypeID(FirstTypeID),
     FirstIdentID(NUM_PREDEF_IDENT_IDS), NextIdentID(FirstIdentID), 
@@ -3212,7 +3237,9 @@ void ASTWriter::WriteASTCore(Sema &SemaRef, MemorizeStatCalls *StatCalls,
     DeclIDs[Context.UInt128Decl] = PREDEF_DECL_UNSIGNED_INT_128_ID;
   if (Context.ObjCInstanceTypeDecl)
     DeclIDs[Context.ObjCInstanceTypeDecl] = PREDEF_DECL_OBJC_INSTANCETYPE_ID;
-  
+  if (Context.BuiltinVaListDecl)
+    DeclIDs[Context.getBuiltinVaListDecl()] = PREDEF_DECL_BUILTIN_VA_LIST_ID;
+
   if (!Chain) {
     // Make sure that we emit IdentifierInfos (and any attached
     // declarations) for builtins. We don't need to do this when we're
@@ -3378,13 +3405,20 @@ void ASTWriter::WriteASTCore(Sema &SemaRef, MemorizeStatCalls *StatCalls,
       Record.push_back(reinterpret_cast<uint64_t>(NS));
     }
   }
-  
+
+  // Make sure visible decls, added to DeclContexts previously loaded from
+  // an AST file, are registered for serialization.
+  for (SmallVector<const Decl *, 16>::iterator
+         I = UpdatingVisibleDecls.begin(),
+         E = UpdatingVisibleDecls.end(); I != E; ++I) {
+    GetDeclRef(*I);
+  }
+
   // Resolve any declaration pointers within the declaration updates block.
   ResolveDeclUpdatesBlocks();
   
   // Form the record of special types.
   RecordData SpecialTypes;
-  AddTypeRef(Context.getBuiltinVaListType(), SpecialTypes);
   AddTypeRef(Context.getRawCFConstantStringType(), SpecialTypes);
   AddTypeRef(Context.getFILEType(), SpecialTypes);
   AddTypeRef(Context.getjmp_bufType(), SpecialTypes);
@@ -3412,8 +3446,11 @@ void ASTWriter::WriteASTCore(Sema &SemaRef, MemorizeStatCalls *StatCalls,
   }
   Stream.ExitBlock();
 
+  DoneWritingDeclsAndTypes = true;
+
   WriteFileDeclIDsMap();
   WriteSourceManagerBlock(Context.getSourceManager(), PP, isysroot);
+  WriteComments();
   
   if (Chain) {
     // Write the mapping information describing our module dependencies and how
@@ -3797,6 +3834,11 @@ TypeIdx ASTWriter::GetOrCreateTypeIdx(QualType T) {
 
   TypeIdx &Idx = TypeIdxs[T];
   if (Idx.getIndex() == 0) {
+    if (DoneWritingDeclsAndTypes) {
+      assert(0 && "New type seen after serializing all the types to emit!");
+      return TypeIdx();
+    }
+
     // We haven't seen this type before. Assign it a new ID and put it
     // into the queue of types to emit.
     Idx = TypeIdx(NextTypeID++);
@@ -3834,6 +3876,11 @@ DeclID ASTWriter::GetDeclRef(const Decl *D) {
   assert(!(reinterpret_cast<uintptr_t>(D) & 0x01) && "Invalid decl pointer");
   DeclID &ID = DeclIDs[D];
   if (ID == 0) {
+    if (DoneWritingDeclsAndTypes) {
+      assert(0 && "New decl seen after serializing all the decls to emit!");
+      return 0;
+    }
+
     // We haven't seen this declaration before. Give it a new ID and
     // enqueue it in the list of declarations to emit.
     ID = NextDeclID++;
@@ -4313,11 +4360,7 @@ void ASTWriter::AddCXXDefinitionData(const CXXRecordDecl *D, RecordDataImpl &Rec
   Record.push_back(Data.HasTrivialDefaultConstructor);
   Record.push_back(Data.HasConstexprNonCopyMoveConstructor);
   Record.push_back(Data.DefaultedDefaultConstructorIsConstexpr);
-  Record.push_back(Data.DefaultedCopyConstructorIsConstexpr);
-  Record.push_back(Data.DefaultedMoveConstructorIsConstexpr);
   Record.push_back(Data.HasConstexprDefaultConstructor);
-  Record.push_back(Data.HasConstexprCopyConstructor);
-  Record.push_back(Data.HasConstexprMoveConstructor);
   Record.push_back(Data.HasTrivialCopyConstructor);
   Record.push_back(Data.HasTrivialMoveConstructor);
   Record.push_back(Data.HasTrivialCopyAssignment);
@@ -4459,6 +4502,7 @@ void ASTWriter::AddedVisibleDecl(const DeclContext *DC, const Decl *D) {
     return; // Not a source decl added to a DeclContext from PCH.
 
   AddUpdatedDeclContext(DC);
+  UpdatingVisibleDecls.push_back(D);
 }
 
 void ASTWriter::AddedCXXImplicitMember(const CXXRecordDecl *RD, const Decl *D) {

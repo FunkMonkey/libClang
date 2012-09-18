@@ -325,12 +325,6 @@ public:
 
   const llvm::APSInt* getSymVal(ProgramStateRef St, SymbolRef sym) const;
 
-  // FIXME: Refactor into SimpleConstraintManager?
-  bool isEqual(ProgramStateRef St, SymbolRef sym, const llvm::APSInt& V) const {
-    const llvm::APSInt *i = getSymVal(St, sym);
-    return i ? *i == V : false;
-  }
-
   ProgramStateRef removeDeadBindings(ProgramStateRef St, SymbolReaper& SymReaper);
 
   void print(ProgramStateRef St, raw_ostream &Out,
@@ -380,7 +374,17 @@ RangeConstraintManager::GetRange(ProgramStateRef state, SymbolRef sym) {
   // given symbol type.
   BasicValueFactory &BV = getBasicVals();
   QualType T = sym->getType(BV.getContext());
-  return RangeSet(F, BV.getMinValue(T), BV.getMaxValue(T));
+
+  RangeSet Result(F, BV.getMinValue(T), BV.getMaxValue(T));
+
+  // Special case: references are known to be non-zero.
+  if (T->isReferenceType()) {
+    APSIntType IntType = BV.getAPSIntType(T);
+    Result = Result.Intersect(BV, F, ++IntType.getZeroValue(),
+                                     --IntType.getZeroValue());
+  }
+
+  return Result;
 }
 
 //===------------------------------------------------------------------------===

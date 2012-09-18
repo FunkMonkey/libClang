@@ -37,10 +37,6 @@ def triple_EQ : Joined<"-triple=">, Alias<triple>;
 
 def analysis_UnoptimizedCFG : Flag<"-unoptimized-cfg">,
   HelpText<"Generate unoptimized CFGs for all analyses">;
-def analysis_CFGAddImplicitDtors : Flag<"-cfg-add-implicit-dtors">,
-  HelpText<"Add C++ implicit destructors to CFGs for all analyses">;
-def analysis_CFGAddInitializers : Flag<"-cfg-add-initializers">,
-  HelpText<"Add C++ initializers to CFGs for all analyses">;
 
 def analyzer_store : Separate<"-analyzer-store">,
   HelpText<"Source Code Analysis - Abstract Memory Store Models">;
@@ -121,6 +117,9 @@ def analyzer_disable_checker_EQ : Joined<"-analyzer-disable-checker=">,
 def analyzer_checker_help : Flag<"-analyzer-checker-help">,
   HelpText<"Display the list of analyzer checkers that are available">;
 
+def analyzer_config : Separate<"-analyzer-config">,
+  HelpText<"Choose analyzer options to enable">;
+
 //===----------------------------------------------------------------------===//
 // Migrator Options
 //===----------------------------------------------------------------------===//
@@ -196,6 +195,8 @@ def mrelocation_model : Separate<"-mrelocation-model">,
   HelpText<"The relocation model to use">;
 def munwind_tables : Flag<"-munwind-tables">,
   HelpText<"Generate unwinding tables for all functions">;
+def fuse_init_array : Flag<"-fuse-init-array">,
+  HelpText<"Use .init_array instead of .ctors">;
 def mconstructor_aliases : Flag<"-mconstructor-aliases">,
   HelpText<"Emit complete constructors and destructors as aliases when possible">;
 def mlink_bitcode_file : Separate<"-mlink-bitcode-file">,
@@ -267,6 +268,8 @@ def code_completion_patterns : Flag<"-code-completion-patterns">,
   HelpText<"Include code patterns in code-completion results">;
 def no_code_completion_globals : Flag<"-no-code-completion-globals">,
   HelpText<"Do not include global declarations in code-completion results.">;
+def code_completion_brief_comments : Flag<"-code-completion-brief-comments">,
+  HelpText<"Include brief documentation comments in code-completion results.">;
 def disable_free : Flag<"-disable-free">,
   HelpText<"Disable freeing of memory on exit">;
 def load : Separate<"-load">, MetaVarName<"<dsopath>">,
@@ -282,6 +285,11 @@ def resource_dir : Separate<"-resource-dir">,
   HelpText<"The directory which holds the compiler resource files">;
 def version : Flag<"-version">,
   HelpText<"Print the compiler version">;
+def ast_dump_filter : Separate<"-ast-dump-filter">,
+  MetaVarName<"<dump_filter>">,
+  HelpText<"Use with -ast-dump or -ast-print to dump/print only AST declaration"
+           " nodes having a certain substring in a qualified name. Use"
+           " -ast-list to list all filterable declaration node names.">;
 
 let Group = Action_Group in {
 
@@ -306,6 +314,8 @@ def emit_html : Flag<"-emit-html">,
   HelpText<"Output input source as HTML">;
 def ast_print : Flag<"-ast-print">,
   HelpText<"Build ASTs and then pretty-print them">;
+def ast_list : Flag<"-ast-list">,
+  HelpText<"Build ASTs and print the list of declaration node qualified names">;
 def ast_dump : Flag<"-ast-dump">,
   HelpText<"Build ASTs and then debug dump them">;
 def ast_dump_xml : Flag<"-ast-dump-xml">,
@@ -332,8 +342,6 @@ def rewrite_test : Flag<"-rewrite-test">,
   HelpText<"Rewriter playground">;
 def rewrite_macros : Flag<"-rewrite-macros">,
   HelpText<"Expand macros without full preprocessing">;
-def rewrite_includes : Flag<"-rewrite-includes">,
-  HelpText<"Expand includes without full preprocessing">;
 def migrate : Flag<"-migrate">,
   HelpText<"Migrate source code">;
 }
@@ -381,23 +389,19 @@ def main_file_name : Separate<"-main-file-name">,
   HelpText<"Main file name to use for debug info">;
 def fno_signed_char : Flag<"-fno-signed-char">,
   HelpText<"Char is unsigned">;
+def fno_wchar : Flag<"-fno-wchar">,
+  HelpText<"Disable C++ builtin type wchar_t">;
 def fconstant_string_class : Separate<"-fconstant-string-class">,
   MetaVarName<"<class name>">,
   HelpText<"Specify the class to use for constant Objective-C string objects.">;
 def fobjc_arc_cxxlib_EQ : Joined<"-fobjc-arc-cxxlib=">,
   HelpText<"Objective-C++ Automatic Reference Counting standard library kind">;
-def fobjc_runtime_has_arc : Flag<"-fobjc-runtime-has-arc">,
-  HelpText<"The target Objective-C runtime provides ARC entrypoints">;
 def fobjc_runtime_has_weak : Flag<"-fobjc-runtime-has-weak">,
   HelpText<"The target Objective-C runtime supports ARC weak operations">;
-def fobjc_runtime_has_terminate : Flag<"-fobjc-runtime-has-terminate">,
-  HelpText<"The target Objective-C runtime provides an objc_terminate entrypoint">;
 def fobjc_dispatch_method_EQ : Joined<"-fobjc-dispatch-method=">,
   HelpText<"Objective-C dispatch method to use">;
 def fobjc_default_synthesize_properties : Flag<"-fobjc-default-synthesize-properties">,
   HelpText<"enable the default synthesis of Objective-C properties">;
-def fobjc_fragile_abi : Flag<"-fobjc-fragile-abi">,
-  HelpText<"Use Objective-C's fragile ABI">;
 def pic_level : Separate<"-pic-level">,
   HelpText<"Value for __PIC__">;
 def pie_level : Separate<"-pie-level">,
@@ -414,6 +418,8 @@ def static_define : Flag<"-static-define">,
   HelpText<"Should __STATIC__ be defined">;
 def stack_protector : Separate<"-stack-protector">,
   HelpText<"Enable stack protectors">;
+def stack_protector_buffer_size : Separate<"-stack-protector-buffer-size">,
+  HelpText<"Lower bound for a buffer to be considered for stack protection">;
 def fvisibility : Separate<"-fvisibility">,
   HelpText<"Default symbol visibility">;
 def ftemplate_depth : Separate<"-ftemplate-depth">,
@@ -435,7 +441,7 @@ def fdebugger_support : Flag<"-fdebugger-support">,
 def fdebugger_cast_result_to_id : Flag<"-fdebugger-cast-result-to-id">,
   HelpText<"Enable casting unknown expression results to id">;
 def fdebugger_objc_literal : Flag<"-fdebugger-objc-literal">,
-  HelpText<"Enable special debugger support for objective-C subscripting and literals">;
+  HelpText<"Enable special debugger support for Objective-C subscripting and literals">;
 def fdeprecated_macro : Flag<"-fdeprecated-macro">,
   HelpText<"Defines the __DEPRECATED macro">;
 def fno_deprecated_macro : Flag<"-fno-deprecated-macro">,
@@ -471,6 +477,14 @@ def internal_externc_isystem : JoinedOrSeparate<"-internal-externc-isystem">,
            "implicit extern \"C\" semantics; these are assumed to not be "
            "user-provided and are used to model system and standard headers' "
            "paths.">;
+def isystem_prefix : JoinedOrSeparate<"-isystem-prefix">,
+  MetaVarName<"<prefix>">,
+  HelpText<"Treat all #include paths starting with <prefix> as including a "
+           "system header.">;
+def ino_system_prefix : JoinedOrSeparate<"-ino-system-prefix">,
+  MetaVarName<"<prefix>">,
+  HelpText<"Treat all #include paths starting with <prefix> as not including a "
+           "system header.">;
 
 //===----------------------------------------------------------------------===//
 // Preprocessor Options

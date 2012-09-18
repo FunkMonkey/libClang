@@ -34,9 +34,9 @@ extern void CFStringCreateWithFormat(CFStringRef format, ...) __attribute__((for
 #define CFSTR(cStr)  ((CFStringRef) __builtin___CFStringMakeConstantString ("" cStr ""))
 
 // This function is used instead of the builtin if -fno-constant-cfstrings.
-// The definition on Mac OS X is NOT annotated with format_arg as of 10.7,
-// but if it were, we want the same checking behavior as with the builtin.
-extern CFStringRef __CFStringMakeConstantString(const char *) __attribute__((format_arg(1)));
+// The definition on Mac OS X is NOT annotated with format_arg as of 10.8,
+// but clang will implicitly add the attribute if it's not written.
+extern CFStringRef __CFStringMakeConstantString(const char *);
 
 int printf(const char * restrict, ...) ;
 
@@ -208,5 +208,30 @@ int rdar11049844() {
 
 void test_nonBuiltinCFStrings() {
   CFStringCreateWithFormat(__CFStringMakeConstantString("%@"), 1); // expected-warning{{format specifies type 'id' but the argument has type 'int'}}
+}
+
+
+// Don't crash on an invalid argument expression.
+// <rdar://problem/11890818>
+@interface NSDictionary : NSObject
+- (id)objectForKeyedSubscript:(id)key;
+@end
+
+void testInvalidFormatArgument(NSDictionary *dict) {
+  NSLog(@"no specifiers", dict[CFSTR("abc")]); // expected-error{{indexing expression is invalid because subscript type 'CFStringRef' (aka 'const struct __CFString *') is not an integral or Objective-C pointer type}}
+  NSLog(@"%@", dict[CFSTR("abc")]); // expected-error{{indexing expression is invalid because subscript type 'CFStringRef' (aka 'const struct __CFString *') is not an integral or Objective-C pointer type}}
+  NSLog(@"%@ %@", dict[CFSTR("abc")]); // expected-error{{indexing expression is invalid because subscript type 'CFStringRef' (aka 'const struct __CFString *') is not an integral or Objective-C pointer type}}
+
+  [Foo fooWithFormat:@"no specifiers", dict[CFSTR("abc")]]; // expected-error{{indexing expression is invalid because subscript type 'CFStringRef' (aka 'const struct __CFString *') is not an integral or Objective-C pointer type}}
+  [Foo fooWithFormat:@"%@", dict[CFSTR("abc")]]; // expected-error{{indexing expression is invalid because subscript type 'CFStringRef' (aka 'const struct __CFString *') is not an integral or Objective-C pointer type}}
+  [Foo fooWithFormat:@"%@ %@", dict[CFSTR("abc")]]; // expected-error{{indexing expression is invalid because subscript type 'CFStringRef' (aka 'const struct __CFString *') is not an integral or Objective-C pointer type}} expected-warning{{more '%' conversions than data arguments}}
+}
+
+
+// <rdar://problem/11825593>
+void testByValueObjectInFormat(Foo *obj) {
+  printf("%d %d %d", 1L, *obj, 1L); // expected-error {{cannot pass object with interface type 'Foo' by value to variadic function; expected type from format string was 'int'}} expected-warning 2 {{format specifies type 'int' but the argument has type 'long'}}
+
+  [Bar log2:@"%d", *obj]; // expected-error {{cannot pass object with interface type 'Foo' by value to variadic method; expected type from format string was 'int'}}
 }
 

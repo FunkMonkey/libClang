@@ -117,21 +117,17 @@ bool SymExpr::symbol_iterator::operator!=(const symbol_iterator &X) const {
 
 SymExpr::symbol_iterator::symbol_iterator(const SymExpr *SE) {
   itr.push_back(SE);
-  while (!isa<SymbolData>(itr.back())) expand();
 }
 
 SymExpr::symbol_iterator &SymExpr::symbol_iterator::operator++() {
   assert(!itr.empty() && "attempting to iterate on an 'end' iterator");
-  assert(isa<SymbolData>(itr.back()));
-  itr.pop_back();
-  if (!itr.empty())
-    while (!isa<SymbolData>(itr.back())) expand();
+  expand();
   return *this;
 }
 
 SymbolRef SymExpr::symbol_iterator::operator*() {
   assert(!itr.empty() && "attempting to dereference an 'end' iterator");
-  return cast<SymbolData>(itr.back());
+  return itr.back();
 }
 
 void SymExpr::symbol_iterator::expand() {
@@ -187,11 +183,11 @@ SymbolManager::getRegionValueSymbol(const TypedValueRegion* R) {
   return cast<SymbolRegionValue>(SD);
 }
 
-const SymbolConjured*
-SymbolManager::getConjuredSymbol(const Stmt *E, const LocationContext *LCtx,
-                                 QualType T, unsigned Count,
-                                 const void *SymbolTag) {
-
+const SymbolConjured* SymbolManager::conjureSymbol(const Stmt *E,
+                                                   const LocationContext *LCtx,
+                                                   QualType T,
+                                                   unsigned Count,
+                                                   const void *SymbolTag) {
   llvm::FoldingSetNodeID profile;
   SymbolConjured::Profile(profile, E, T, Count, LCtx, SymbolTag);
   void *InsertPos;
@@ -520,7 +516,7 @@ bool SymbolReaper::isLive(const VarRegion *VR, bool includeStoreBindings) const{
   const StackFrameContext *CurrentContext = LCtx->getCurrentStackFrame();
 
   if (VarContext == CurrentContext) {
-    // If no statemetnt is provided, everything is live.
+    // If no statement is provided, everything is live.
     if (!Loc)
       return true;
 
@@ -548,7 +544,7 @@ bool SymbolReaper::isLive(const VarRegion *VR, bool includeStoreBindings) const{
     return false;
   }
 
-  return VarContext->isParentOf(CurrentContext);
+  return !VarContext || VarContext->isParentOf(CurrentContext);
 }
 
 SymbolVisitor::~SymbolVisitor() {}

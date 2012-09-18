@@ -81,6 +81,13 @@ void oopsMoreCommas() {
   &a == &b ? oopsMoreCommas() : removeUnusedLabels(a[0]);
 }
 
+int commaAtEndOfStatement() {
+  int a = 1;
+  a = 5, // expected-error {{';'}}
+  int m = 5, // expected-error {{';'}}
+  return 0, // expected-error {{';'}}
+}
+
 int noSemiAfterLabel(int n) {
   switch (n) {
     default:
@@ -100,3 +107,11 @@ int noSemiAfterLabel(int n) {
   }
   return 1;
 }
+
+struct noSemiAfterStruct // expected-error {{expected ';' after struct}}
+struct noSemiAfterStruct {
+  int n // expected-warning {{';'}}
+} // expected-error {{expected ';' after struct}}
+enum noSemiAfterEnum {
+  e1
+} // expected-error {{expected ';' after enum}}

@@ -299,14 +299,12 @@ public:
     return Args.NumArgs;
   }
 
-  /// Determines whether two template arguments are superficially the
+  /// \brief Determines whether two template arguments are superficially the
   /// same.
   bool structurallyEquals(const TemplateArgument &Other) const;
 
-  /// \brief When the template argument is a pack expansion, returns 
+  /// \brief When the template argument is a pack expansion, returns
   /// the pattern of the pack expansion.
-  ///
-  /// \param Ellipsis Will be set to the location of the ellipsis.
   TemplateArgument getPackExpansionPattern() const;
 
   /// \brief Print this template argument to the given output stream.
@@ -512,17 +510,23 @@ public:
 /// This is safe to be used inside an AST node, in contrast with
 /// TemplateArgumentListInfo.
 struct ASTTemplateArgumentListInfo {
-  /// \brief The source location of the left angle bracket ('<');
+  /// \brief The source location of the left angle bracket ('<').
   SourceLocation LAngleLoc;
   
-  /// \brief The source location of the right angle bracket ('>');
+  /// \brief The source location of the right angle bracket ('>').
   SourceLocation RAngleLoc;
   
-  /// \brief The number of template arguments in TemplateArgs.
-  /// The actual template arguments (if any) are stored after the
-  /// ExplicitTemplateArgumentList structure.
-  unsigned NumTemplateArgs;
-  
+  union {
+    /// \brief The number of template arguments in TemplateArgs.
+    /// The actual template arguments (if any) are stored after the
+    /// ExplicitTemplateArgumentList structure.
+    unsigned NumTemplateArgs;
+
+    /// Force ASTTemplateArgumentListInfo to the right alignment
+    /// for the following array of TemplateArgumentLocs.
+    void *Aligner;
+  };
+
   /// \brief Retrieve the template arguments
   TemplateArgumentLoc *getTemplateArgs() {
     return reinterpret_cast<TemplateArgumentLoc *> (this + 1);

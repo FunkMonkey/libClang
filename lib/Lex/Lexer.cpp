@@ -127,7 +127,7 @@ Lexer::Lexer(FileID FID, const llvm::MemoryBuffer *InputFile, Preprocessor &PP)
 }
 
 /// Lexer constructor - Create a new raw lexer object.  This object is only
-/// suitable for calls to 'LexRawToken'.  This lexer assumes that the text
+/// suitable for calls to 'LexFromRawLexer'.  This lexer assumes that the text
 /// range will outlive it, so it doesn't take ownership of it.
 Lexer::Lexer(SourceLocation fileloc, const LangOptions &langOpts,
              const char *BufStart, const char *BufPtr, const char *BufEnd)
@@ -140,7 +140,7 @@ Lexer::Lexer(SourceLocation fileloc, const LangOptions &langOpts,
 }
 
 /// Lexer constructor - Create a new raw lexer object.  This object is only
-/// suitable for calls to 'LexRawToken'.  This lexer assumes that the text
+/// suitable for calls to 'LexFromRawLexer'.  This lexer assumes that the text
 /// range will outlive it, so it doesn't take ownership of it.
 Lexer::Lexer(FileID FID, const llvm::MemoryBuffer *FromFile,
              const SourceManager &SM, const LangOptions &langOpts)
@@ -544,7 +544,6 @@ Lexer::ComputePreamble(const llvm::MemoryBuffer *Buffer,
     if (InPreprocessorDirective) {
       // If we've hit the end of the file, we're done.
       if (TheTok.getKind() == tok::eof) {
-        InPreprocessorDirective = false;
         break;
       }
       
@@ -820,10 +819,6 @@ static CharSourceRange makeRangeFromFileLocs(CharSourceRange Range,
   return CharSourceRange::getCharRange(Begin, End);
 }
 
-/// \brief Accepts a range and returns a character range with file locations.
-///
-/// Returns a null range if a part of the range resides inside a macro
-/// expansion or the range does not reside on the same FileID.
 CharSourceRange Lexer::makeFileCharRange(CharSourceRange Range,
                                          const SourceManager &SM,
                                          const LangOptions &LangOpts) {
@@ -1091,20 +1086,21 @@ static inline bool isIdentifierBody(unsigned char c) {
 }
 
 /// isHorizontalWhitespace - Return true if this character is horizontal
-/// whitespace: ' ', '\t', '\f', '\v'.  Note that this returns false for '\0'.
+/// whitespace: ' ', '\\t', '\\f', '\\v'.  Note that this returns false for
+/// '\\0'.
 static inline bool isHorizontalWhitespace(unsigned char c) {
   return (CharInfo[c] & CHAR_HORZ_WS) ? true : false;
 }
 
 /// isVerticalWhitespace - Return true if this character is vertical
-/// whitespace: '\n', '\r'.  Note that this returns false for '\0'.
+/// whitespace: '\\n', '\\r'.  Note that this returns false for '\\0'.
 static inline bool isVerticalWhitespace(unsigned char c) {
   return (CharInfo[c] & CHAR_VERT_WS) ? true : false;
 }
 
 /// isWhitespace - Return true if this character is horizontal or vertical
-/// whitespace: ' ', '\t', '\f', '\v', '\n', '\r'.  Note that this returns false
-/// for '\0'.
+/// whitespace: ' ', '\\t', '\\f', '\\v', '\\n', '\\r'.  Note that this returns
+/// false for '\\0'.
 static inline bool isWhitespace(unsigned char c) {
   return (CharInfo[c] & (CHAR_HORZ_WS|CHAR_VERT_WS)) ? true : false;
 }
@@ -1538,7 +1534,7 @@ FinishIdentifier:
 
 /// isHexaLiteral - Return true if Start points to a hex constant.
 /// in microsoft mode (where this is supposed to be several different tokens).
-static bool isHexaLiteral(const char *Start, const LangOptions &LangOpts) {
+bool Lexer::isHexaLiteral(const char *Start, const LangOptions &LangOpts) {
   unsigned Size;
   char C1 = Lexer::getCharAndSizeNoWarn(Start, Size, LangOpts);
   if (C1 != '0')
@@ -1569,8 +1565,20 @@ void Lexer::LexNumericConstant(Token &Result, const char *CurPtr) {
   }
 
   // If we have a hex FP constant, continue.
-  if ((C == '-' || C == '+') && (PrevCh == 'P' || PrevCh == 'p'))
-    return LexNumericConstant(Result, ConsumeChar(CurPtr, Size, Result));
+  if ((C == '-' || C == '+') && (PrevCh == 'P' || PrevCh == 'p')) {
+    // Outside C99, we accept hexadecimal floating point numbers as a
+    // not-quite-conforming extension. Only do so if this looks like it's
+    // actually meant to be a hexfloat, and not if it has a ud-suffix.
+    bool IsHexFloat = true;
+    if (!LangOpts.C99) {
+      if (!isHexaLiteral(BufferPtr, LangOpts))
+        IsHexFloat = false;
+      else if (std::find(BufferPtr, CurPtr, '_') != CurPtr)
+        IsHexFloat = false;
+    }
+    if (IsHexFloat)
+      return LexNumericConstant(Result, ConsumeChar(CurPtr, Size, Result));
+  }
 
   // Update the location of token as well as BufferPtr.
   const char *TokStart = BufferPtr;
@@ -1640,7 +1648,7 @@ void Lexer::LexStringLiteral(Token &Result, const char *CurPtr,
     if (C == '\n' || C == '\r' ||             // Newline.
         (C == 0 && CurPtr-1 == BufferEnd)) {  // End of file.
       if (!isLexingRawMode() && !LangOpts.AsmPreprocessor)
-        Diag(BufferPtr, diag::warn_unterminated_string);
+        Diag(BufferPtr, diag::ext_unterminated_string);
       FormTokenWithChars(Result, CurPtr-1, tok::unknown);
       return;
     }
@@ -1760,7 +1768,7 @@ void Lexer::LexAngledStringLiteral(Token &Result, const char *CurPtr) {
     // Skip escaped characters.
     if (C == '\\') {
       // Skip the escaped character.
-      C = getAndAdvanceChar(CurPtr, Result);
+      getAndAdvanceChar(CurPtr, Result);
     } else if (C == '\n' || C == '\r' ||             // Newline.
                (C == 0 && (CurPtr-1 == BufferEnd ||  // End of file.
                            isCodeCompletionPoint(CurPtr-1)))) {
@@ -1798,7 +1806,7 @@ void Lexer::LexCharConstant(Token &Result, const char *CurPtr,
   char C = getAndAdvanceChar(CurPtr, Result);
   if (C == '\'') {
     if (!isLexingRawMode() && !LangOpts.AsmPreprocessor)
-      Diag(BufferPtr, diag::err_empty_character);
+      Diag(BufferPtr, diag::ext_empty_character);
     FormTokenWithChars(Result, CurPtr, tok::unknown);
     return;
   }
@@ -1808,11 +1816,11 @@ void Lexer::LexCharConstant(Token &Result, const char *CurPtr,
     if (C == '\\') {
       // Skip the escaped character.
       // FIXME: UCN's
-      C = getAndAdvanceChar(CurPtr, Result);
+      getAndAdvanceChar(CurPtr, Result);
     } else if (C == '\n' || C == '\r' ||             // Newline.
                (C == 0 && CurPtr-1 == BufferEnd)) {  // End of file.
       if (!isLexingRawMode() && !LangOpts.AsmPreprocessor)
-        Diag(BufferPtr, diag::warn_unterminated_char);
+        Diag(BufferPtr, diag::ext_unterminated_char);
       FormTokenWithChars(Result, CurPtr-1, tok::unknown);
       return;
     } else if (C == 0) {
@@ -1929,8 +1937,6 @@ bool Lexer::SkipBCPLComment(Token &Result, const char *CurPtr) {
         CurPtr = EscapePtr-2;
       else
         break; // This is a newline, we're done.
-
-      C = *CurPtr;
     }
 
     // Otherwise, this is a hard case.  Fall back on getAndAdvanceChar to
@@ -2115,12 +2121,12 @@ static bool isEndOfBlockCommentWithEscapedNewLine(const char *CurPtr,
 #undef bool
 #endif
 
-/// SkipBlockComment - We have just read the /* characters from input.  Read
-/// until we find the */ characters that terminate the comment.  Note that we
-/// don't bother decoding trigraphs or escaped newlines in block comments,
-/// because they cannot cause the comment to end.  The only thing that can
-/// happen is the comment could end with an escaped newline between the */ end
-/// of comment.
+/// We have just read from input the / and * characters that started a comment.
+/// Read until we find the * and / characters that terminate the comment.
+/// Note that we don't bother decoding trigraphs or escaped newlines in block
+/// comments, because they cannot cause the comment to end.  The only thing
+/// that can happen is the comment could end with an escaped newline between
+/// the terminating * and /.
 ///
 /// If we're in KeepCommentMode or any CommentHandler has inserted
 /// some tokens, this will store the first token and return true.
@@ -2173,7 +2179,8 @@ bool Lexer::SkipBlockComment(Token &Result, const char *CurPtr) {
 #ifdef __SSE2__
       __m128i Slashes = _mm_set1_epi8('/');
       while (CurPtr+16 <= BufferEnd) {
-        int cmp = _mm_movemask_epi8(_mm_cmpeq_epi8(*(__m128i*)CurPtr, Slashes));
+        int cmp = _mm_movemask_epi8(_mm_cmpeq_epi8(*(const __m128i*)CurPtr,
+                                    Slashes));
         if (cmp != 0) {
           // Adjust the pointer to point directly after the first slash. It's
           // not necessary to set C here, it will be overwritten at the end of
@@ -2389,7 +2396,7 @@ bool Lexer::LexEndOfFile(Token &Result, const char *CurPtr) {
   BufferPtr = CurPtr;
 
   // Finally, let the preprocessor handle this.
-  return PP->HandleEndOfFile(Result);
+  return PP->HandleEndOfFile(Result, isPragmaLexer());
 }
 
 /// isNextPPTokenLParen - Return 1 if the next unexpanded token lexed from
@@ -2424,7 +2431,7 @@ unsigned Lexer::isNextPPTokenLParen() {
   return Tok.is(tok::l_paren);
 }
 
-/// FindConflictEnd - Find the end of a version control conflict marker.
+/// \brief Find the end of a version control conflict marker.
 static const char *FindConflictEnd(const char *CurPtr, const char *BufferEnd,
                                    ConflictMarkerKind CMK) {
   const char *Terminator = CMK == CMK_Perforce ? "<<<<\n" : ">>>>>>>";
@@ -2631,7 +2638,7 @@ LexNextToken:
       ParsingPreprocessorDirective = false;
 
       // Restore comment saving mode, in case it was disabled for directive.
-      if (!LexingRawMode)
+      if (PP)
         SetCommentRetentionState(PP->getCommentRetentionState());
 
       // Since we consumed a newline, we are back at the start of a line.

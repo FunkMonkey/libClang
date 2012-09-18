@@ -13,6 +13,7 @@
 
 #include "llvm/Support/raw_ostream.h"
 #include "clang/AST/TypeLocVisitor.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/Expr.h"
 #include "llvm/Support/ErrorHandling.h"
 using namespace clang;
@@ -240,6 +241,7 @@ TypeSpecifierType BuiltinTypeLoc::getWrittenTypeSpec() const {
   case BuiltinType::ObjCId:
   case BuiltinType::ObjCClass:
   case BuiltinType::ObjCSel:
+  case BuiltinType::BuiltinFn:
     return TST_unspecified;
   }
 

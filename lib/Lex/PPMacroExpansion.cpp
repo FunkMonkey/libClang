@@ -33,15 +33,15 @@ using namespace clang;
 
 MacroInfo *Preprocessor::getInfoForMacro(IdentifierInfo *II) const {
   assert(II->hasMacroDefinition() && "Identifier is not a macro!");
-  
-  llvm::DenseMap<IdentifierInfo*, MacroInfo*>::const_iterator Pos
-    = Macros.find(II);
+
+  macro_iterator Pos = Macros.find(II);
   if (Pos == Macros.end()) {
     // Load this macro from the external source.
     getExternalSource()->LoadMacroDefinition(II);
     Pos = Macros.find(II);
   }
   assert(Pos != Macros.end() && "Identifier macro info is missing!");
+  assert(Pos->second->getUndefLoc().isInvalid() && "Macro is undefined!");
   return Pos->second;
 }
 
@@ -49,17 +49,21 @@ MacroInfo *Preprocessor::getInfoForMacro(IdentifierInfo *II) const {
 ///
 void Preprocessor::setMacroInfo(IdentifierInfo *II, MacroInfo *MI,
                                 bool LoadedFromAST) {
-  if (MI) {
-    Macros[II] = MI;
-    II->setHasMacroDefinition(true);
-    if (II->isFromAST() && !LoadedFromAST)
-      II->setChangedSinceDeserialization();
-  } else if (II->hasMacroDefinition()) {
-    Macros.erase(II);
-    II->setHasMacroDefinition(false);
-    if (II->isFromAST() && !LoadedFromAST)
-      II->setChangedSinceDeserialization();
-  }
+  assert(MI && "MacroInfo should be non-zero!");
+  MI->setPreviousDefinition(Macros[II]);
+  Macros[II] = MI;
+  II->setHasMacroDefinition(true);
+  if (II->isFromAST() && !LoadedFromAST)
+    II->setChangedSinceDeserialization();
+}
+
+/// \brief Undefine a macro for this identifier.
+void Preprocessor::clearMacroInfo(IdentifierInfo *II) {
+  assert(II->hasMacroDefinition() && "Macro is not defined!");
+  assert(Macros[II]->getUndefLoc().isValid() && "Macro is still defined!");
+  II->setHasMacroDefinition(false);
+  if (II->isFromAST())
+    II->setChangedSinceDeserialization();
 }
 
 /// RegisterBuiltinMacro - Register the specified identifier in the identifier
@@ -215,7 +219,7 @@ bool Preprocessor::HandleMacroExpandedIdentifier(Token &Identifier,
 
   // If this is a function-like macro, read the arguments.
   if (MI->isFunctionLike()) {
-    // C99 6.10.3p10: If the preprocessing token immediately after the the macro
+    // C99 6.10.3p10: If the preprocessing token immediately after the macro
     // name isn't a '(', this macro should not be expanded.
     if (!isNextPPTokenLParen())
       return true;
@@ -337,7 +341,7 @@ bool Preprocessor::HandleMacroExpandedIdentifier(Token &Identifier,
   }
 
   // Start expanding the macro.
-  EnterMacro(Identifier, ExpansionEnd, Args);
+  EnterMacro(Identifier, ExpansionEnd, MI, Args);
 
   // Now that the macro is at the top of the include stack, ask the
   // preprocessor to read the next token from it.
@@ -399,7 +403,11 @@ MacroArgs *Preprocessor::ReadFunctionLikeMacroArgs(Token &MacroName,
         }
       } else if (Tok.is(tok::l_paren)) {
         ++NumParens;
-      } else if (Tok.is(tok::comma) && NumParens == 0) {
+      // In Microsoft-compatibility mode, commas from nested macro expan-
+      // sions should not be considered as argument separators. We test
+      // for this with the IgnoredComma token flag.
+      } else if (Tok.is(tok::comma)
+          && !(Tok.getFlags() & Token::IgnoredComma) && NumParens == 0) {
         // Comma ends this argument if there are more fixed arguments expected.
         // However, if this is a variadic macro, and this is part of the
         // variadic part, then the comma is just an argument token.
@@ -487,10 +495,12 @@ MacroArgs *Preprocessor::ReadFunctionLikeMacroArgs(Token &MacroName,
     } else if (MI->isVariadic() &&
                (NumActuals+1 == MinArgsExpected ||  // A(x, ...) -> A(X)
                 (NumActuals == 0 && MinArgsExpected == 2))) {// A(x,...) -> A()
-      // Varargs where the named vararg parameter is missing: ok as extension.
-      // #define A(x, ...)
-      // A("blah")
+      // Varargs where the named vararg parameter is missing: OK as extension.
+      //   #define A(x, ...)
+      //   A("blah")
       Diag(Tok, diag::ext_missing_varargs_arg);
+      Diag(MI->getDefinitionLoc(), diag::note_macro_here)
+        << MacroName.getIdentifierInfo();
 
       // Remember this occurred, allowing us to elide the comma when used for
       // cases like:
@@ -617,6 +627,7 @@ static bool HasFeature(const Preprocessor &PP, const IdentifierInfo *II) {
            .Case("address_sanitizer", LangOpts.AddressSanitizer)
            .Case("attribute_analyzer_noreturn", true)
            .Case("attribute_availability", true)
+           .Case("attribute_availability_with_message", true)
            .Case("attribute_cf_returns_not_retained", true)
            .Case("attribute_cf_returns_retained", true)
            .Case("attribute_deprecated_with_message", true)
@@ -630,6 +641,7 @@ static bool HasFeature(const Preprocessor &PP, const IdentifierInfo *II) {
            .Case("attribute_objc_method_family", true)
            .Case("attribute_overloadable", true)
            .Case("attribute_unavailable_with_message", true)
+           .Case("attribute_unused_on_fields", true)
            .Case("blocks", LangOpts.Blocks)
            .Case("cxx_exceptions", LangOpts.Exceptions)
            .Case("cxx_rtti", LangOpts.RTTI)
@@ -637,19 +649,18 @@ static bool HasFeature(const Preprocessor &PP, const IdentifierInfo *II) {
            // Objective-C features
            .Case("objc_arr", LangOpts.ObjCAutoRefCount) // FIXME: REMOVE?
            .Case("objc_arc", LangOpts.ObjCAutoRefCount)
-           .Case("objc_arc_weak", LangOpts.ObjCAutoRefCount && 
-                 LangOpts.ObjCRuntimeHasWeak)
+           .Case("objc_arc_weak", LangOpts.ObjCARCWeak)
            .Case("objc_default_synthesize_properties", LangOpts.ObjC2)
            .Case("objc_fixed_enum", LangOpts.ObjC2)
            .Case("objc_instancetype", LangOpts.ObjC2)
            .Case("objc_modules", LangOpts.ObjC2 && LangOpts.Modules)
-           .Case("objc_nonfragile_abi", LangOpts.ObjCNonFragileABI)
-           .Case("objc_weak_class", LangOpts.ObjCNonFragileABI)
+           .Case("objc_nonfragile_abi", LangOpts.ObjCRuntime.isNonFragile())
+           .Case("objc_weak_class", LangOpts.ObjCRuntime.hasWeakClassImport())
            .Case("ownership_holds", true)
            .Case("ownership_returns", true)
            .Case("ownership_takes", true)
            .Case("objc_bool", true)
-           .Case("objc_subscripting", LangOpts.ObjCNonFragileABI)
+           .Case("objc_subscripting", LangOpts.ObjCRuntime.isNonFragile())
            .Case("objc_array_literals", LangOpts.ObjC2)
            .Case("objc_dictionary_literals", LangOpts.ObjC2)
            .Case("objc_boxed_expressions", LangOpts.ObjC2)
@@ -712,22 +723,12 @@ static bool HasFeature(const Preprocessor &PP, const IdentifierInfo *II) {
             // "struct __is_empty" parsing hack hasn't been needed in this
             // translation unit. If it has, __is_empty reverts to a normal
             // identifier and __has_feature(is_empty) evaluates false.
-           .Case("is_empty", 
-                 LangOpts.CPlusPlus && 
-                 PP.getIdentifierInfo("__is_empty")->getTokenID()
-                                                            != tok::identifier)
+           .Case("is_empty", LangOpts.CPlusPlus)
            .Case("is_enum", LangOpts.CPlusPlus)
            .Case("is_final", LangOpts.CPlusPlus)
            .Case("is_literal", LangOpts.CPlusPlus)
            .Case("is_standard_layout", LangOpts.CPlusPlus)
-           // __is_pod is available only if the horrible
-           // "struct __is_pod" parsing hack hasn't been needed in this
-           // translation unit. If it has, __is_pod reverts to a normal
-           // identifier and __has_feature(is_pod) evaluates false.
-           .Case("is_pod", 
-                 LangOpts.CPlusPlus && 
-                 PP.getIdentifierInfo("__is_pod")->getTokenID()
-                                                            != tok::identifier)
+           .Case("is_pod", LangOpts.CPlusPlus)
            .Case("is_polymorphic", LangOpts.CPlusPlus)
            .Case("is_trivial", LangOpts.CPlusPlus)
            .Case("is_trivially_assignable", LangOpts.CPlusPlus)
@@ -791,6 +792,7 @@ static bool HasAttribute(const IdentifierInfo *II) {
   if (Name.startswith("__") && Name.endswith("__") && Name.size() >= 4)
     Name = Name.substr(2, Name.size() - 4);
 
+  // FIXME: Do we need to handle namespaces here?
   return llvm::StringSwitch<bool>(Name)
 #include "clang/Lex/AttrSpellings.inc"
         .Default(false);
@@ -1049,7 +1051,7 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
     if (Tok.is(tok::l_paren)) {
       // Read the identifier
       Lex(Tok);
-      if (Tok.is(tok::identifier)) {
+      if (Tok.is(tok::identifier) || Tok.is(tok::kw_const)) {
         FeatureII = Tok.getIdentifierInfo();
 
         // Read the ')'.

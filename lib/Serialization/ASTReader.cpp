@@ -90,6 +90,12 @@ PCHValidator::ReadLanguageOptions(const LangOptions &LangOpts) {
 #define BENIGN_LANGOPT(Name, Bits, Default, Description)
 #define BENIGN_ENUM_LANGOPT(Name, Type, Bits, Default, Description)
 #include "clang/Basic/LangOptions.def"
+
+  if (PPLangOpts.ObjCRuntime != LangOpts.ObjCRuntime) {
+    Reader.Diag(diag::err_pch_langopt_value_mismatch)
+      << "target Objective-C runtime";
+    return true;
+  }
   
   return false;
 }
@@ -829,7 +835,7 @@ bool ASTReader::ParseLineTable(ModuleFile &F,
       Entries.push_back(LineEntry::get(FileOffset, LineNo, FilenameID,
                                        FileKind, IncludeOffset));
     }
-    LineTable.AddEntry(FID, Entries);
+    LineTable.AddEntry(FileID::get(FID), Entries);
   }
 
   return false;
@@ -1121,8 +1127,9 @@ ASTReader::ASTReadResult ASTReader::ReadSLocEntryRecord(int ID) {
       // This is the module's main file.
       IncludeLoc = getImportLocation(F);
     }
-    FileID FID = SourceMgr.createFileID(File, IncludeLoc,
-                                        (SrcMgr::CharacteristicKind)Record[2],
+    SrcMgr::CharacteristicKind
+      FileCharacter = (SrcMgr::CharacteristicKind)Record[2];
+    FileID FID = SourceMgr.createFileID(File, IncludeLoc, FileCharacter,
                                         ID, BaseOffset + Record[0]);
     SrcMgr::FileInfo &FileInfo =
           const_cast<SrcMgr::FileInfo&>(SourceMgr.getSLocEntry(FID).getFile());
@@ -1139,7 +1146,8 @@ ASTReader::ASTReadResult ASTReader::ReadSLocEntryRecord(int ID) {
     }
     
     const SrcMgr::ContentCache *ContentCache
-      = SourceMgr.getOrCreateContentCache(File);
+      = SourceMgr.getOrCreateContentCache(File,
+                              /*isSystemFile=*/FileCharacter != SrcMgr::C_User);
     if (OverriddenBuffer && !ContentCache->BufferOverridden &&
         ContentCache->ContentsEntry == ContentCache->OrigEntry) {
       unsigned Code = SLocEntryCursor.ReadCode();
@@ -1736,6 +1744,17 @@ ASTReader::ReadASTBlock(ModuleFile &F) {
           return IgnorePCH;            
         }
         break;
+
+      case COMMENTS_BLOCK_ID: {
+        llvm::BitstreamCursor C = Stream;
+        if (Stream.SkipBlock() ||
+            ReadBlockAbbrevs(C, COMMENTS_BLOCK_ID)) {
+          Error("malformed comments block in AST file");
+          return Failure;
+        }
+        CommentsCursors.push_back(std::make_pair(C, &F));
+        break;
+      }
 
       default:
         if (!Stream.SkipBlock())
@@ -2612,7 +2631,7 @@ void ASTReader::makeModuleVisible(Module *Mod,
     
     for (unsigned I = 0, N = Mod->Imports.size(); I != N; ++I) {
       Module *Imported = Mod->Imports[I];
-      if (Visited.count(Imported))
+      if (!Visited.insert(Imported))
         continue;
       
       bool Acceptable = UnrestrictedWildcard;
@@ -2630,7 +2649,6 @@ void ASTReader::makeModuleVisible(Module *Mod,
       if (!Acceptable)
         continue;
       
-      Visited.insert(Imported);
       Stack.push_back(Imported);
     }
   }
@@ -2851,11 +2869,6 @@ void ASTReader::InitializeContext() {
   
   // Load the special types.
   if (SpecialTypes.size() >= NumSpecialTypeIDs) {
-    if (Context.getBuiltinVaListType().isNull()) {
-      Context.setBuiltinVaListType(
-        GetType(SpecialTypes[SPECIAL_TYPE_BUILTIN_VA_LIST]));
-    }
-    
     if (unsigned String = SpecialTypes[SPECIAL_TYPE_CF_CONSTANT_STRING]) {
       if (!Context.CFConstantStringTypeDecl)
         Context.setCFConstantStringType(GetType(String));
@@ -2995,7 +3008,7 @@ std::string ASTReader::getOriginalSourceFile(const std::string &ASTFileName,
   OwningPtr<llvm::MemoryBuffer> Buffer;
   Buffer.reset(FileMgr.getBufferForFile(ASTFileName, &ErrStr));
   if (!Buffer) {
-    Diags.Report(diag::err_fe_unable_to_read_pch_file) << ErrStr;
+    Diags.Report(diag::err_fe_unable_to_read_pch_file) << ASTFileName << ErrStr;
     return std::string();
   }
 
@@ -3317,8 +3330,7 @@ ASTReader::ASTReadResult ASTReader::ReadSubmoduleBlock(ModuleFile &F) {
 /// them to the AST listener if one is set.
 ///
 /// \returns true if the listener deems the file unacceptable, false otherwise.
-bool ASTReader::ParseLanguageOptions(
-                             const SmallVectorImpl<uint64_t> &Record) {
+bool ASTReader::ParseLanguageOptions(const RecordData &Record) {
   if (Listener) {
     LangOptions LangOpts;
     unsigned Idx = 0;
@@ -3327,6 +3339,10 @@ bool ASTReader::ParseLanguageOptions(
 #define ENUM_LANGOPT(Name, Type, Bits, Default, Description) \
   LangOpts.set##Name(static_cast<LangOptions::Type>(Record[Idx++]));
 #include "clang/Basic/LangOptions.def"
+
+    ObjCRuntime::Kind runtimeKind = (ObjCRuntime::Kind) Record[Idx++];
+    VersionTuple runtimeVersion = ReadVersionTuple(Record, Idx);
+    LangOpts.ObjCRuntime = ObjCRuntime(runtimeKind, runtimeVersion);
     
     unsigned Length = Record[Idx++];
     LangOpts.CurrentModule.assign(Record.begin() + Idx, 
@@ -3889,6 +3905,8 @@ QualType ASTReader::readTypeRecord(unsigned Index) {
     } else if (EST == EST_Uninstantiated) {
       EPI.ExceptionSpecDecl = ReadDeclAs<FunctionDecl>(*Loc.F, Record, Idx);
       EPI.ExceptionSpecTemplate = ReadDeclAs<FunctionDecl>(*Loc.F, Record, Idx);
+    } else if (EST == EST_Unevaluated) {
+      EPI.ExceptionSpecDecl = ReadDeclAs<FunctionDecl>(*Loc.F, Record, Idx);
     }
     return Context.getFunctionType(ResultType, ParamTypes.data(), NumParams,
                                     EPI);
@@ -4240,7 +4258,6 @@ void TypeLocReader::VisitExtVectorTypeLoc(ExtVectorTypeLoc TL) {
 void TypeLocReader::VisitFunctionTypeLoc(FunctionTypeLoc TL) {
   TL.setLocalRangeBegin(ReadSourceLocation(Record, Idx));
   TL.setLocalRangeEnd(ReadSourceLocation(Record, Idx));
-  TL.setTrailingReturn(Record[Idx++]);
   for (unsigned i = 0, e = TL.getNumArgs(); i != e; ++i) {
     TL.setArg(i, ReadDeclAs<ParmVarDecl>(Record, Idx));
   }
@@ -4446,6 +4463,13 @@ QualType ASTReader::GetType(TypeID ID) {
       T = Context.ARCUnbridgedCastTy;
       break;
 
+    case PREDEF_TYPE_VA_LIST_TAG:
+      T = Context.getVaListTagType();
+      break;
+
+    case PREDEF_TYPE_BUILTIN_FN:
+      T = Context.BuiltinFnTy;
+      break;
     }
 
     assert(!T.isNull() && "Unknown predefined type");
@@ -4646,13 +4670,18 @@ Decl *ASTReader::GetDecl(DeclID ID) {
         
     case PREDEF_DECL_OBJC_INSTANCETYPE_ID:
       return Context.getObjCInstanceTypeDecl();
+
+    case PREDEF_DECL_BUILTIN_VA_LIST_ID:
+      return Context.getBuiltinVaListDecl();
     }
   }
   
   unsigned Index = ID - NUM_PREDEF_DECL_IDS;
 
   if (Index >= DeclsLoaded.size()) {
+    assert(0 && "declaration ID out-of-range for AST file");
     Error("declaration ID out-of-range for AST file");
+    return 0;
   }
   
   if (!DeclsLoaded[Index]) {
@@ -6258,6 +6287,59 @@ SwitchCase *ASTReader::getSwitchCaseWithID(unsigned ID) {
 
 void ASTReader::ClearSwitchCaseIDs() {
   CurrSwitchCaseStmts->clear();
+}
+
+void ASTReader::ReadComments() {
+  std::vector<RawComment *> Comments;
+  for (SmallVectorImpl<std::pair<llvm::BitstreamCursor,
+                                 serialization::ModuleFile *> >::iterator
+       I = CommentsCursors.begin(),
+       E = CommentsCursors.end();
+       I != E; ++I) {
+    llvm::BitstreamCursor &Cursor = I->first;
+    serialization::ModuleFile &F = *I->second;
+    SavedStreamPosition SavedPosition(Cursor);
+
+    RecordData Record;
+    while (true) {
+      unsigned Code = Cursor.ReadCode();
+      if (Code == llvm::bitc::END_BLOCK)
+        break;
+
+      if (Code == llvm::bitc::ENTER_SUBBLOCK) {
+        // No known subblocks, always skip them.
+        Cursor.ReadSubBlockID();
+        if (Cursor.SkipBlock()) {
+          Error("malformed block record in AST file");
+          return;
+        }
+        continue;
+      }
+
+      if (Code == llvm::bitc::DEFINE_ABBREV) {
+        Cursor.ReadAbbrevRecord();
+        continue;
+      }
+
+      // Read a record.
+      Record.clear();
+      switch ((CommentRecordTypes) Cursor.ReadRecord(Code, Record)) {
+      case COMMENTS_RAW_COMMENT: {
+        unsigned Idx = 0;
+        SourceRange SR = ReadSourceRange(F, Record, Idx);
+        RawComment::CommentKind Kind =
+            (RawComment::CommentKind) Record[Idx++];
+        bool IsTrailingComment = Record[Idx++];
+        bool IsAlmostTrailingComment = Record[Idx++];
+        Comments.push_back(new (Context) RawComment(SR, Kind,
+                                                    IsTrailingComment,
+                                                    IsAlmostTrailingComment));
+        break;
+      }
+      }
+    }
+  }
+  Context.Comments.addCommentsToFront(Comments);
 }
 
 void ASTReader::finishPendingActions() {

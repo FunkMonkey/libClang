@@ -10,13 +10,14 @@ void free(void *ptr);
 struct A {};
 struct B {};
 
-void foo() {
+void foo(unsigned int unsignedInt, unsigned int readSize) {
   int *ip1 = malloc(sizeof(1));
   int *ip2 = malloc(4 * sizeof(int));
 
   long *lp1 = malloc(sizeof(short)); // expected-warning {{Result of 'malloc' is converted to a pointer of type 'long', which is incompatible with sizeof operand type 'short'}}
   long *lp2 = malloc(5 * sizeof(double)); // expected-warning {{Result of 'malloc' is converted to a pointer of type 'long', which is incompatible with sizeof operand type 'double'}}
-  long *lp3 = malloc(5 * sizeof(char) + 2); // expected-warning {{Result of 'malloc' is converted to a pointer of type 'long', which is incompatible with sizeof operand type 'char'}}
+  char *cp3 = malloc(5 * sizeof(char) + 2); // no warning
+  unsigned char *buf = malloc(readSize + sizeof(unsignedInt)); // no warning
 
   struct A *ap1 = calloc(1, sizeof(struct A));
   struct A *ap2 = calloc(2, sizeof(*ap1));
@@ -32,4 +33,20 @@ void ignore_const() {
   const char **x = (const char **)malloc(1 * sizeof(char *)); // no-warning
   const char ***y = (const char ***)malloc(1 * sizeof(char *)); // expected-warning {{Result of 'malloc' is converted to a pointer of type 'const char **', which is incompatible with sizeof operand type 'char *'}}
   free(x);
+}
+
+int *mallocArraySize() {
+  static const int sTable[10];
+  static const int nestedTable[10][2];
+  int *table = malloc(sizeof sTable);
+  int *table1 = malloc(sizeof nestedTable);
+  int (*table2)[2] = malloc(sizeof nestedTable);
+  int (*table3)[10][2] = malloc(sizeof nestedTable);
+  return table;
+}
+
+int *mallocWrongArraySize() {
+  static const double sTable[10];
+  int *table = malloc(sizeof sTable); // expected-warning {{Result of 'malloc' is converted to a pointer of type 'int', which is incompatible with sizeof operand type 'const double [10]'}}
+  return table;
 }

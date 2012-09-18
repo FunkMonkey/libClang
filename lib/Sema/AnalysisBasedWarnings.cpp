@@ -182,12 +182,11 @@ static ControlFlowKind CheckFallThrough(AnalysisDeclContext &AC) {
       HasFakeEdge = true;
       continue;
     }
-    if (const AsmStmt *AS = dyn_cast<AsmStmt>(S)) {
-      if (AS->isMSAsm()) {
-        HasFakeEdge = true;
-        HasLiveReturn = true;
-        continue;
-      }
+    if (isa<MSAsmStmt>(S)) {
+      // TODO: Verify this is correct.
+      HasFakeEdge = true;
+      HasLiveReturn = true;
+      continue;
     }
     if (isa<CXXTryStmt>(S)) {
       HasAbnormalEdge = true;
@@ -815,14 +814,14 @@ namespace {
 }
 
 static void DiagnoseSwitchLabelsFallthrough(Sema &S, AnalysisDeclContext &AC,
-                                            bool PerMethod) {
+                                            bool PerFunction) {
   FallthroughMapper FM(S);
   FM.TraverseStmt(AC.getBody());
 
   if (!FM.foundSwitchStatements())
     return;
 
-  if (PerMethod && FM.getFallthroughStmts().empty())
+  if (PerFunction && FM.getFallthroughStmts().empty())
     return;
 
   CFG *Cfg = AC.getCFG();
@@ -843,8 +842,8 @@ static void DiagnoseSwitchLabelsFallthrough(Sema &S, AnalysisDeclContext &AC,
       continue;
 
     S.Diag(Label->getLocStart(),
-        PerMethod ? diag::warn_unannotated_fallthrough_per_method
-                  : diag::warn_unannotated_fallthrough);
+        PerFunction ? diag::warn_unannotated_fallthrough_per_function
+                    : diag::warn_unannotated_fallthrough);
 
     if (!AnnotatedCnt) {
       SourceLocation L = Label->getLocStart();
@@ -1055,6 +1054,9 @@ class ThreadSafetyReporter : public clang::thread_safety::ThreadSafetyHandler {
       case LEK_LockedAtEndOfFunction:
         DiagID = diag::warn_no_unlock;
         break;
+      case LEK_NotLockedAtEndOfFunction:
+        DiagID = diag::warn_expecting_locked;
+        break;
     }
     if (LocEndOfScope.isInvalid())
       LocEndOfScope = FunEndLocation;
@@ -1087,22 +1089,42 @@ class ThreadSafetyReporter : public clang::thread_safety::ThreadSafetyHandler {
   }
 
   void handleMutexNotHeld(const NamedDecl *D, ProtectedOperationKind POK,
-                          Name LockName, LockKind LK, SourceLocation Loc) {
+                          Name LockName, LockKind LK, SourceLocation Loc,
+                          Name *PossibleMatch) {
     unsigned DiagID = 0;
-    switch (POK) {
-      case POK_VarAccess:
-        DiagID = diag::warn_variable_requires_lock;
-        break;
-      case POK_VarDereference:
-        DiagID = diag::warn_var_deref_requires_lock;
-        break;
-      case POK_FunctionCall:
-        DiagID = diag::warn_fun_requires_lock;
-        break;
+    if (PossibleMatch) {
+      switch (POK) {
+        case POK_VarAccess:
+          DiagID = diag::warn_variable_requires_lock_precise;
+          break;
+        case POK_VarDereference:
+          DiagID = diag::warn_var_deref_requires_lock_precise;
+          break;
+        case POK_FunctionCall:
+          DiagID = diag::warn_fun_requires_lock_precise;
+          break;
+      }
+      PartialDiagnosticAt Warning(Loc, S.PDiag(DiagID)
+        << D->getName() << LockName << LK);
+      PartialDiagnosticAt Note(Loc, S.PDiag(diag::note_found_mutex_near_match)
+                               << *PossibleMatch);
+      Warnings.push_back(DelayedDiag(Warning, OptionalNotes(1, Note)));
+    } else {
+      switch (POK) {
+        case POK_VarAccess:
+          DiagID = diag::warn_variable_requires_lock;
+          break;
+        case POK_VarDereference:
+          DiagID = diag::warn_var_deref_requires_lock;
+          break;
+        case POK_FunctionCall:
+          DiagID = diag::warn_fun_requires_lock;
+          break;
+      }
+      PartialDiagnosticAt Warning(Loc, S.PDiag(DiagID)
+        << D->getName() << LockName << LK);
+      Warnings.push_back(DelayedDiag(Warning, OptionalNotes()));
     }
-    PartialDiagnosticAt Warning(Loc, S.PDiag(DiagID)
-      << D->getName() << LockName << LK);
-    Warnings.push_back(DelayedDiag(Warning, OptionalNotes()));
   }
 
   void handleFunExcludesLock(Name FunName, Name LockName, SourceLocation Loc) {
@@ -1197,7 +1219,8 @@ AnalysisBasedWarnings::IssueWarnings(sema::AnalysisBasedWarnings::Policy P,
   AC.getCFGBuildOptions().AddEHEdges = false;
   AC.getCFGBuildOptions().AddInitializers = true;
   AC.getCFGBuildOptions().AddImplicitDtors = true;
-  
+  AC.getCFGBuildOptions().AddTemporaryDtors = true;
+
   // Force that certain expressions appear as CFGElements in the CFG.  This
   // is used to speed up various analyses.
   // FIXME: This isn't the right factoring.  This is here for initial
@@ -1211,6 +1234,7 @@ AnalysisBasedWarnings::IssueWarnings(sema::AnalysisBasedWarnings::Policy P,
   else {
     AC.getCFGBuildOptions()
       .setAlwaysAdd(Stmt::BinaryOperatorClass)
+      .setAlwaysAdd(Stmt::CompoundAssignOperatorClass)
       .setAlwaysAdd(Stmt::BlockExprClass)
       .setAlwaysAdd(Stmt::CStyleCastExprClass)
       .setAlwaysAdd(Stmt::DeclRefExprClass)
@@ -1333,10 +1357,10 @@ AnalysisBasedWarnings::IssueWarnings(sema::AnalysisBasedWarnings::Policy P,
   bool FallThroughDiagFull =
       Diags.getDiagnosticLevel(diag::warn_unannotated_fallthrough,
                                D->getLocStart()) != DiagnosticsEngine::Ignored;
-  bool FallThroughDiagPerMethod =
-      Diags.getDiagnosticLevel(diag::warn_unannotated_fallthrough_per_method,
+  bool FallThroughDiagPerFunction =
+      Diags.getDiagnosticLevel(diag::warn_unannotated_fallthrough_per_function,
                                D->getLocStart()) != DiagnosticsEngine::Ignored;
-  if (FallThroughDiagFull || FallThroughDiagPerMethod) {
+  if (FallThroughDiagFull || FallThroughDiagPerFunction) {
     DiagnoseSwitchLabelsFallthrough(S, AC, !FallThroughDiagFull);
   }
 

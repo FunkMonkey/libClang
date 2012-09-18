@@ -90,7 +90,8 @@ Preprocessor::Preprocessor(DiagnosticsEngine &diags, LangOptions &opts,
   InMacroArgs = false;
   InMacroArgPreExpansion = false;
   NumCachedTokenLexers = 0;
-  
+  PragmasEnabled = true;
+
   CachedLexPos = 0;
   
   // We haven't read anything from the external source.
@@ -236,6 +237,20 @@ void Preprocessor::PrintStats() {
   llvm::errs() << (NumFastTokenPaste+NumTokenPaste)
              << " token paste (##) operations performed, "
              << NumFastTokenPaste << " on the fast path.\n";
+
+  llvm::errs() << "\nPreprocessor Memory: " << getTotalMemory() << "B total";
+
+  llvm::errs() << "\n  BumpPtr: " << BP.getTotalMemory();
+  llvm::errs() << "\n  Macro Expanded Tokens: "
+               << llvm::capacity_in_bytes(MacroExpandedTokens);
+  llvm::errs() << "\n  Predefines Buffer: " << Predefines.capacity();
+  llvm::errs() << "\n  Macros: " << llvm::capacity_in_bytes(Macros);
+  llvm::errs() << "\n  #pragma push_macro Info: "
+               << llvm::capacity_in_bytes(PragmaPushMacroInfo);
+  llvm::errs() << "\n  Poison Reasons: "
+               << llvm::capacity_in_bytes(PoisonReasons);
+  llvm::errs() << "\n  Comment Handlers: "
+               << llvm::capacity_in_bytes(CommentHandlers) << "\n";
 }
 
 Preprocessor::macro_iterator
@@ -426,7 +441,7 @@ void Preprocessor::EnterMainSourceFile() {
   llvm::MemoryBuffer *SB =
     llvm::MemoryBuffer::getMemBufferCopy(Predefines, "<built-in>");
   assert(SB && "Cannot create predefined source buffer");
-  FileID FID = SourceMgr.createPredefinesFileIDForMemBuffer(SB);
+  FileID FID = SourceMgr.createFileIDForMemBuffer(SB);
   assert(!FID.isInvalid() && "Could not create FileID for predefines?");
 
   // Start parsing the predefines.
@@ -514,9 +529,19 @@ void Preprocessor::HandleIdentifier(Token &Identifier) {
 
   // If the information about this identifier is out of date, update it from
   // the external source.
+  // We have to treat __VA_ARGS__ in a special way, since it gets
+  // serialized with isPoisoned = true, but our preprocessor may have
+  // unpoisoned it if we're defining a C99 macro.
   if (II.isOutOfDate()) {
+    bool CurrentIsPoisoned = false;
+    if (&II == Ident__VA_ARGS__)
+      CurrentIsPoisoned = Ident__VA_ARGS__->isPoisoned();
+
     ExternalSource->updateOutOfDateIdentifier(II);
     Identifier.setKind(II.getTokenID());
+
+    if (&II == Ident__VA_ARGS__)
+      II.setIsPoisoned(CurrentIsPoisoned);
   }
   
   // If this identifier was poisoned, and if it was not produced from a macro
@@ -622,14 +647,14 @@ void Preprocessor::LexAfterModuleImport(Token &Result) {
                                      /*IsIncludeDirective=*/false);
 }
 
-void Preprocessor::AddCommentHandler(CommentHandler *Handler) {
+void Preprocessor::addCommentHandler(CommentHandler *Handler) {
   assert(Handler && "NULL comment handler");
   assert(std::find(CommentHandlers.begin(), CommentHandlers.end(), Handler) ==
          CommentHandlers.end() && "Comment handler already registered");
   CommentHandlers.push_back(Handler);
 }
 
-void Preprocessor::RemoveCommentHandler(CommentHandler *Handler) {
+void Preprocessor::removeCommentHandler(CommentHandler *Handler) {
   std::vector<CommentHandler *>::iterator Pos
   = std::find(CommentHandlers.begin(), CommentHandlers.end(), Handler);
   assert(Pos != CommentHandlers.end() && "Comment handler not registered");

@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/DeclCXX.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/MemRegion.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/SVals.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/SValBuilder.h"
@@ -105,25 +106,23 @@ SValBuilder::getRegionValueSymbolVal(const TypedValueRegion* region) {
   return nonloc::SymbolVal(sym);
 }
 
-DefinedOrUnknownSVal
-SValBuilder::getConjuredSymbolVal(const void *symbolTag,
-                                  const Expr *expr,
-                                  const LocationContext *LCtx,
-                                  unsigned count) {
+DefinedOrUnknownSVal SValBuilder::conjureSymbolVal(const void *symbolTag,
+                                                   const Expr *expr,
+                                                   const LocationContext *LCtx,
+                                                   unsigned count) {
   QualType T = expr->getType();
-  return getConjuredSymbolVal(symbolTag, expr, LCtx, T, count);
+  return conjureSymbolVal(symbolTag, expr, LCtx, T, count);
 }
 
-DefinedOrUnknownSVal
-SValBuilder::getConjuredSymbolVal(const void *symbolTag,
-                                  const Expr *expr,
-                                  const LocationContext *LCtx,
-                                  QualType type,
-                                  unsigned count) {
+DefinedOrUnknownSVal SValBuilder::conjureSymbolVal(const void *symbolTag,
+                                                   const Expr *expr,
+                                                   const LocationContext *LCtx,
+                                                   QualType type,
+                                                   unsigned count) {
   if (!SymbolManager::canSymbolicate(type))
     return UnknownVal();
 
-  SymbolRef sym = SymMgr.getConjuredSymbol(expr, LCtx, type, count, symbolTag);
+  SymbolRef sym = SymMgr.conjureSymbol(expr, LCtx, type, count, symbolTag);
 
   if (Loc::isLocType(type))
     return loc::MemRegionVal(MemMgr.getSymbolicRegion(sym));
@@ -132,15 +131,14 @@ SValBuilder::getConjuredSymbolVal(const void *symbolTag,
 }
 
 
-DefinedOrUnknownSVal
-SValBuilder::getConjuredSymbolVal(const Stmt *stmt,
-                                  const LocationContext *LCtx,
-                                  QualType type,
-                                  unsigned visitCount) {
+DefinedOrUnknownSVal SValBuilder::conjureSymbolVal(const Stmt *stmt,
+                                                   const LocationContext *LCtx,
+                                                   QualType type,
+                                                   unsigned visitCount) {
   if (!SymbolManager::canSymbolicate(type))
     return UnknownVal();
 
-  SymbolRef sym = SymMgr.getConjuredSymbol(stmt, LCtx, type, visitCount);
+  SymbolRef sym = SymMgr.conjureSymbol(stmt, LCtx, type, visitCount);
   
   if (Loc::isLocType(type))
     return loc::MemRegionVal(MemMgr.getSymbolicRegion(sym));
@@ -156,7 +154,7 @@ SValBuilder::getConjuredHeapSymbolVal(const Expr *E,
   assert(Loc::isLocType(T));
   assert(SymbolManager::canSymbolicate(T));
 
-  SymbolRef sym = SymMgr.getConjuredSymbol(E, LCtx, T, VisitCount);
+  SymbolRef sym = SymMgr.conjureSymbol(E, LCtx, T, VisitCount);
   return loc::MemRegionVal(MemMgr.getSymbolicHeapRegion(sym));
 }
 
@@ -202,6 +200,21 @@ DefinedSVal SValBuilder::getBlockPointer(const BlockDecl *block,
     MemMgr.getBlockTextRegion(block, locTy, locContext->getAnalysisDeclContext());
   const BlockDataRegion *BD = MemMgr.getBlockDataRegion(BC, locContext);
   return loc::MemRegionVal(BD);
+}
+
+/// Return a memory region for the 'this' object reference.
+loc::MemRegionVal SValBuilder::getCXXThis(const CXXMethodDecl *D,
+                                          const StackFrameContext *SFC) {
+  return loc::MemRegionVal(getRegionManager().
+                           getCXXThisRegion(D->getThisType(getContext()), SFC));
+}
+
+/// Return a memory region for the 'this' object reference.
+loc::MemRegionVal SValBuilder::getCXXThis(const CXXRecordDecl *D,
+                                          const StackFrameContext *SFC) {
+  const Type *T = D->getTypeForDecl();
+  QualType PT = getContext().getPointerType(QualType(T, 0));
+  return loc::MemRegionVal(getRegionManager().getCXXThisRegion(PT, SFC));
 }
 
 //===----------------------------------------------------------------------===//

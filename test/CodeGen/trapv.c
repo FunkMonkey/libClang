@@ -1,4 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin10 -ftrapv %s -emit-llvm -o - | FileCheck %s
+// RUN: %clang_cc1 -triple x86_64-apple-darwin10 -fcatch-undefined-behavior %s -emit-llvm -o - | FileCheck %s
 
 unsigned int ui, uj, uk;
 int i, j, k;
@@ -17,7 +18,8 @@ void test0() {
   // CHECK-NEXT: [[T3:%.*]] = call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 [[T1]], i32 [[T2]])
   // CHECK-NEXT: [[T4:%.*]] = extractvalue { i32, i1 } [[T3]], 0
   // CHECK-NEXT: [[T5:%.*]] = extractvalue { i32, i1 } [[T3]], 1
-  // CHECK-NEXT: br i1 [[T5]]
+  // CHECK-NEXT: [[T6:%.*]] = xor i1 [[T5]], true
+  // CHECK-NEXT: br i1 [[T6]]
   // CHECK:      call void @llvm.trap()
   i = j + k;
 }
@@ -31,7 +33,8 @@ void test1() {
   // CHECK-NEXT: [[T2:%.*]] = call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 [[T1]], i32 1)
   // CHECK-NEXT: [[T3:%.*]] = extractvalue { i32, i1 } [[T2]], 0
   // CHECK-NEXT: [[T4:%.*]] = extractvalue { i32, i1 } [[T2]], 1
-  // CHECK-NEXT: br i1 [[T4]]
+  // CHECK-NEXT: [[T5:%.*]] = xor i1 [[T4]], true
+  // CHECK-NEXT: br i1 [[T5]]
   // CHECK:      call void @llvm.trap()
 }
 
@@ -44,6 +47,7 @@ void test2() {
   // CHECK-NEXT: [[T2:%.*]] = call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 [[T1]], i32 1)
   // CHECK-NEXT: [[T3:%.*]] = extractvalue { i32, i1 } [[T2]], 0
   // CHECK-NEXT: [[T4:%.*]] = extractvalue { i32, i1 } [[T2]], 1
-  // CHECK-NEXT: br i1 [[T4]]
+  // CHECK-NEXT: [[T5:%.*]] = xor i1 [[T4]], true
+  // CHECK-NEXT: br i1 [[T5]]
   // CHECK:      call void @llvm.trap()
 }

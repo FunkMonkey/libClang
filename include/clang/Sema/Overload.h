@@ -748,19 +748,12 @@ namespace clang {
     unsigned NumInlineSequences;
     char InlineSpace[16 * sizeof(ImplicitConversionSequence)];
 
-    OverloadCandidateSet(const OverloadCandidateSet &);
-    OverloadCandidateSet &operator=(const OverloadCandidateSet &);
-    
+    OverloadCandidateSet(const OverloadCandidateSet &) LLVM_DELETED_FUNCTION;
+    void operator=(const OverloadCandidateSet &) LLVM_DELETED_FUNCTION;
+
   public:
     OverloadCandidateSet(SourceLocation Loc) : Loc(Loc), NumInlineSequences(0){}
-    ~OverloadCandidateSet() {
-      for (iterator i = begin(), e = end(); i != e; ++i) {
-        for (unsigned ii = 0, ie = i->NumConversions; ii != ie; ++ii)
-          i->Conversions[ii].~ImplicitConversionSequence();
-        if (i->FailureKind == ovl_fail_bad_deduction)
-          i->DeductionFailure.Destroy();
-      }
-    }
+    ~OverloadCandidateSet() { clear(); }
 
     SourceLocation getLocation() const { return Loc; }
 

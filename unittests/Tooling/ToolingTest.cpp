@@ -53,11 +53,16 @@ class FindTopLevelDeclConsumer : public clang::ASTConsumer {
 };
 } // end namespace
 
-TEST(runToolOnCode, FindsTopLevelDeclOnEmptyCode) {
+TEST(runToolOnCode, FindsNoTopLevelDeclOnEmptyCode) {
   bool FoundTopLevelDecl = false;
   EXPECT_TRUE(runToolOnCode(
       new TestAction(new FindTopLevelDeclConsumer(&FoundTopLevelDecl)), ""));
+#if !defined(_MSC_VER)
+  EXPECT_FALSE(FoundTopLevelDecl);
+#else
+  // FIXME: LangOpts.MicrosoftExt appends "class type_info;"
   EXPECT_TRUE(FoundTopLevelDecl);
+#endif
 }
 
 namespace {
@@ -99,7 +104,9 @@ TEST(newFrontendActionFactory, CreatesFrontendActionFactoryFromType) {
 }
 
 struct IndependentFrontendActionCreator {
-  FrontendAction *newFrontendAction() { return new SyntaxOnlyAction; }
+  ASTConsumer *newASTConsumer() {
+    return new FindTopLevelDeclConsumer(NULL);
+  }
 };
 
 TEST(newFrontendActionFactory, CreatesFrontendActionFactoryFromFactoryType) {

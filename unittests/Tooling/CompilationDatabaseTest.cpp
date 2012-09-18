@@ -11,7 +11,7 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclGroup.h"
 #include "clang/Frontend/FrontendAction.h"
-#include "clang/Tooling/CompilationDatabase.h"
+#include "clang/Tooling/JSONCompilationDatabase.h"
 #include "clang/Tooling/Tooling.h"
 #include "gtest/gtest.h"
 
@@ -36,6 +36,35 @@ TEST(JSONCompilationDatabase, ErrsOnInvalidFormat) {
   expectFailure("[{\"directory\":\"\",\"command\":\"\"}]", "Missing file");
   expectFailure("[{\"directory\":\"\",\"file\":\"\"}]", "Missing command");
   expectFailure("[{\"command\":\"\",\"file\":\"\"}]", "Missing directory");
+}
+
+static std::vector<std::string> getAllFiles(StringRef JSONDatabase,
+                                            std::string &ErrorMessage) {
+  llvm::OwningPtr<CompilationDatabase> Database(
+      JSONCompilationDatabase::loadFromBuffer(JSONDatabase, ErrorMessage));
+  if (!Database) {
+    ADD_FAILURE() << ErrorMessage;
+    return std::vector<std::string>();
+  }
+  return Database->getAllFiles();
+}
+
+TEST(JSONCompilationDatabase, GetAllFiles) {
+  std::string ErrorMessage;
+  EXPECT_EQ(std::vector<std::string>(),
+            getAllFiles("[]", ErrorMessage)) << ErrorMessage;
+
+  std::vector<std::string> expected_files;
+  expected_files.push_back("file1");
+  expected_files.push_back("file2");
+  EXPECT_EQ(expected_files, getAllFiles(
+    "[{\"directory\":\"dir\","
+      "\"command\":\"command\","
+      "\"file\":\"file1\"},"
+    " {\"directory\":\"dir\","
+      "\"command\":\"command\","
+      "\"file\":\"file2\"}]",
+    ErrorMessage)) << ErrorMessage;
 }
 
 static CompileCommand findCompileArgsInJsonDatabase(StringRef FileName,
@@ -253,6 +282,15 @@ TEST(FixedCompilationDatabase, ReturnsFixedCommandLine) {
   ExpectedCommandLine.push_back("source");
   EXPECT_EQ(".", Result[0].Directory);
   EXPECT_EQ(ExpectedCommandLine, Result[0].CommandLine);
+}
+
+TEST(FixedCompilationDatabase, GetAllFiles) {
+  std::vector<std::string> CommandLine;
+  CommandLine.push_back("one");
+  CommandLine.push_back("two");
+  FixedCompilationDatabase Database(".", CommandLine);
+
+  EXPECT_EQ(0ul, Database.getAllFiles().size());
 }
 
 TEST(ParseFixedCompilationDatabase, ReturnsNullOnEmptyArgumentList) {

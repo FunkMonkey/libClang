@@ -31,11 +31,11 @@ class DiagnosticBuilder;
 enum ConflictMarkerKind {
   /// Not within a conflict marker.
   CMK_None,
-  /// A normal or diff3 conflict marker, initiated by at least 7 <s,
-  /// separated by at least 7 =s or |s, and terminated by at least 7 >s.
+  /// A normal or diff3 conflict marker, initiated by at least 7 "<"s,
+  /// separated by at least 7 "="s or "|"s, and terminated by at least 7 ">"s.
   CMK_Normal,
-  /// A Perforce-style conflict marker, initiated by 4 >s, separated by 4 =s,
-  /// and terminated by 4 <s.
+  /// A Perforce-style conflict marker, initiated by 4 ">"s,
+  /// separated by 4 "="s, and terminated by 4 "<"s.
   CMK_Perforce
 };
 
@@ -83,8 +83,8 @@ class Lexer : public PreprocessorLexer {
   // CurrentConflictMarkerState - The kind of conflict marker we are handling.
   ConflictMarkerKind CurrentConflictMarkerState;
 
-  Lexer(const Lexer&);          // DO NOT IMPLEMENT
-  void operator=(const Lexer&); // DO NOT IMPLEMENT
+  Lexer(const Lexer &) LLVM_DELETED_FUNCTION;
+  void operator=(const Lexer &) LLVM_DELETED_FUNCTION;
   friend class Preprocessor;
 
   void InitLexer(const char *BufStart, const char *BufPtr, const char *BufEnd);
@@ -97,14 +97,14 @@ public:
   Lexer(FileID FID, const llvm::MemoryBuffer *InputBuffer, Preprocessor &PP);
 
   /// Lexer constructor - Create a new raw lexer object.  This object is only
-  /// suitable for calls to 'LexRawToken'.  This lexer assumes that the text
-  /// range will outlive it, so it doesn't take ownership of it.
+  /// suitable for calls to 'LexFromRawLexer'.  This lexer assumes that the
+  /// text range will outlive it, so it doesn't take ownership of it.
   Lexer(SourceLocation FileLoc, const LangOptions &LangOpts,
         const char *BufStart, const char *BufPtr, const char *BufEnd);
 
   /// Lexer constructor - Create a new raw lexer object.  This object is only
-  /// suitable for calls to 'LexRawToken'.  This lexer assumes that the text
-  /// range will outlive it, so it doesn't take ownership of it.
+  /// suitable for calls to 'LexFromRawLexer'.  This lexer assumes that the
+  /// text range will outlive it, so it doesn't take ownership of it.
   Lexer(FileID FID, const llvm::MemoryBuffer *InputBuffer,
         const SourceManager &SM, const LangOptions &LangOpts);
 
@@ -278,8 +278,6 @@ public:
   /// \brief Given a location any where in a source buffer, find the location
   /// that corresponds to the beginning of the token in which the original
   /// source location lands.
-  ///
-  /// \param Loc 
   static SourceLocation GetBeginningOfToken(SourceLocation Loc,
                                             const SourceManager &SM,
                                             const LangOptions &LangOpts);
@@ -324,7 +322,7 @@ public:
   /// \brief Returns true if the given MacroID location points at the last
   /// token of the macro expansion.
   ///
-  /// \param MacroBegin If non-null and function returns true, it is set to
+  /// \param MacroEnd If non-null and function returns true, it is set to
   /// end location of the macro.
   static bool isAtEndOfMacroExpansion(SourceLocation loc,
                                       const SourceManager &SM,
@@ -341,7 +339,7 @@ public:
   ///
   /// -begin or end range lies at the start or end of a macro expansion, in
   ///  which case the location will be set to the expansion point, e.g:
-  ///    #define M 1 2
+  ///    \#define M 1 2
   ///    a M
   /// If you have a range [a, 2] (where 2 came from the macro), the function
   /// will return a range for "a M"
@@ -350,8 +348,8 @@ public:
   ///
   /// -The macro is a function macro and the range can be mapped to the macro
   ///  arguments, e.g:
-  ///    #define M 1 2
-  ///    #define FM(x) x
+  ///    \#define M 1 2
+  ///    \#define FM(x) x
   ///    FM(a b M)
   /// if you have range [b, 2], the function will return the file range "b M"
   /// inside the macro arguments.
@@ -396,7 +394,36 @@ public:
   static std::pair<unsigned, bool>
   ComputePreamble(const llvm::MemoryBuffer *Buffer, const LangOptions &LangOpts,
                   unsigned MaxLines = 0);
-                                        
+
+  /// \brief Checks that the given token is the first token that occurs after
+  /// the given location (this excludes comments and whitespace). Returns the
+  /// location immediately after the specified token. If the token is not found
+  /// or the location is inside a macro, the returned source location will be
+  /// invalid.
+  static SourceLocation findLocationAfterToken(SourceLocation loc,
+                                         tok::TokenKind TKind,
+                                         const SourceManager &SM,
+                                         const LangOptions &LangOpts,
+                                         bool SkipTrailingWhitespaceAndNewLine);
+
+  /// \brief Returns true if the given character could appear in an identifier.
+  static bool isIdentifierBodyChar(char c, const LangOptions &LangOpts);
+
+  /// getCharAndSizeNoWarn - Like the getCharAndSize method, but does not ever
+  /// emit a warning.
+  static inline char getCharAndSizeNoWarn(const char *Ptr, unsigned &Size,
+                                          const LangOptions &LangOpts) {
+    // If this is not a trigraph and not a UCN or escaped newline, return
+    // quickly.
+    if (isObviouslySimpleCharacter(Ptr[0])) {
+      Size = 1;
+      return *Ptr;
+    }
+
+    Size = 0;
+    return getCharAndSizeSlowNoWarn(Ptr, Size, LangOpts);
+  }
+
   //===--------------------------------------------------------------------===//
   // Internal implementation interfaces.
 private:
@@ -427,7 +454,6 @@ private:
 
   //===--------------------------------------------------------------------===//
   // Lexer character reading interfaces.
-public:
 
   // This lexer is built on two interfaces for reading characters, both of which
   // automatically provide phase 1/2 translation.  getAndAdvanceChar is used
@@ -467,7 +493,6 @@ public:
     return C;
   }
 
-private:
   /// ConsumeChar - When a character (identified by getCharAndSize) is consumed
   /// and added to a given token, check to see if there are diagnostics that
   /// need to be emitted or flags that need to be set on the token.  If so, do
@@ -503,22 +528,6 @@ private:
   /// getCharAndSizeSlow - Handle the slow/uncommon case of the getCharAndSize
   /// method.
   char getCharAndSizeSlow(const char *Ptr, unsigned &Size, Token *Tok = 0);
-public:
-
-  /// getCharAndSizeNoWarn - Like the getCharAndSize method, but does not ever
-  /// emit a warning.
-  static inline char getCharAndSizeNoWarn(const char *Ptr, unsigned &Size,
-                                          const LangOptions &LangOpts) {
-    // If this is not a trigraph and not a UCN or escaped newline, return
-    // quickly.
-    if (isObviouslySimpleCharacter(Ptr[0])) {
-      Size = 1;
-      return *Ptr;
-    }
-
-    Size = 0;
-    return getCharAndSizeSlowNoWarn(Ptr, Size, LangOpts);
-  }
 
   /// getEscapedNewLineSize - Return the size of the specified escaped newline,
   /// or 0 if it is not an escaped newline. P[-1] is known to be a "\" on entry
@@ -529,22 +538,6 @@ public:
   /// them), skip over them and return the first non-escaped-newline found,
   /// otherwise return P.
   static const char *SkipEscapedNewLines(const char *P);
-
-  /// \brief Checks that the given token is the first token that occurs after
-  /// the given location (this excludes comments and whitespace). Returns the
-  /// location immediately after the specified token. If the token is not found
-  /// or the location is inside a macro, the returned source location will be
-  /// invalid.
-  static SourceLocation findLocationAfterToken(SourceLocation loc,
-                                         tok::TokenKind TKind,
-                                         const SourceManager &SM,
-                                         const LangOptions &LangOpts,
-                                         bool SkipTrailingWhitespaceAndNewLine);
-
-  /// \brief Returns true if the given character could appear in an identifier.
-  static bool isIdentifierBodyChar(char c, const LangOptions &LangOpts);
-
-private:
 
   /// getCharAndSizeSlowNoWarn - Same as getCharAndSizeSlow, but never emits a
   /// diagnostic.
@@ -580,6 +573,8 @@ private:
 
   bool isCodeCompletionPoint(const char *CurPtr) const;
   void cutOffLexing() { BufferPtr = BufferEnd; }
+
+  bool isHexaLiteral(const char *Start, const LangOptions &LangOpts);
 };
 
 

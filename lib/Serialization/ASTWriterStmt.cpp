@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Serialization/ASTWriter.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclTemplate.h"
@@ -108,6 +109,7 @@ void ASTStmtWriter::VisitLabelStmt(LabelStmt *S) {
 
 void ASTStmtWriter::VisitAttributedStmt(AttributedStmt *S) {
   VisitStmt(S);
+  Record.push_back(S->getAttrs().size());
   Writer.WriteAttributes(S->getAttrs(), Record);
   Writer.AddStmt(S->getSubStmt());
   Writer.AddSourceLocation(S->getAttrLoc(), Record);
@@ -216,7 +218,7 @@ void ASTStmtWriter::VisitDeclStmt(DeclStmt *S) {
   Code = serialization::STMT_DECL;
 }
 
-void ASTStmtWriter::VisitAsmStmt(AsmStmt *S) {
+void ASTStmtWriter::VisitGCCAsmStmt(GCCAsmStmt *S) {
   VisitStmt(S);
   Record.push_back(S->getNumOutputs());
   Record.push_back(S->getNumInputs());
@@ -225,7 +227,6 @@ void ASTStmtWriter::VisitAsmStmt(AsmStmt *S) {
   Writer.AddSourceLocation(S->getRParenLoc(), Record);
   Record.push_back(S->isVolatile());
   Record.push_back(S->isSimple());
-  Record.push_back(S->isMSAsm());
   Writer.AddStmt(S->getAsmString());
 
   // Outputs
@@ -244,9 +245,16 @@ void ASTStmtWriter::VisitAsmStmt(AsmStmt *S) {
 
   // Clobbers
   for (unsigned I = 0, N = S->getNumClobbers(); I != N; ++I)
-    Writer.AddStmt(S->getClobber(I));
+    Writer.AddStmt(S->getClobberStringLiteral(I));
 
-  Code = serialization::STMT_ASM;
+  Code = serialization::STMT_GCCASM;
+}
+
+void ASTStmtWriter::VisitMSAsmStmt(MSAsmStmt *S) {
+  // FIXME: Statement writer not yet implemented for MS style inline asm.
+  VisitStmt(S);
+
+  Code = serialization::STMT_MSASM;
 }
 
 void ASTStmtWriter::VisitExpr(Expr *E) {
@@ -1471,6 +1479,17 @@ void ASTStmtWriter::VisitSubstNonTypeTemplateParmPackExpr(
   Writer.AddTemplateArgument(E->getArgumentPack(), Record);
   Writer.AddSourceLocation(E->getParameterPackLocation(), Record);
   Code = serialization::EXPR_SUBST_NON_TYPE_TEMPLATE_PARM_PACK;
+}
+
+void ASTStmtWriter::VisitFunctionParmPackExpr(FunctionParmPackExpr *E) {
+  VisitExpr(E);
+  Record.push_back(E->getNumExpansions());
+  Writer.AddDeclRef(E->getParameterPack(), Record);
+  Writer.AddSourceLocation(E->getParameterPackLocation(), Record);
+  for (FunctionParmPackExpr::iterator I = E->begin(), End = E->end();
+       I != End; ++I)
+    Writer.AddDeclRef(*I, Record);
+  Code = serialization::EXPR_FUNCTION_PARM_PACK;
 }
 
 void ASTStmtWriter::VisitMaterializeTemporaryExpr(MaterializeTemporaryExpr *E) {

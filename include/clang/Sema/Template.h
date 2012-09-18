@@ -239,8 +239,9 @@ namespace clang {
     unsigned NumArgsInPartiallySubstitutedPack;
 
     // This class is non-copyable
-    LocalInstantiationScope(const LocalInstantiationScope &);
-    LocalInstantiationScope &operator=(const LocalInstantiationScope &);
+    LocalInstantiationScope(
+      const LocalInstantiationScope &) LLVM_DELETED_FUNCTION;
+    void operator=(const LocalInstantiationScope &) LLVM_DELETED_FUNCTION;
 
   public:
     LocalInstantiationScope(Sema &SemaRef, bool CombineWithOuterScope = false)
@@ -372,8 +373,10 @@ namespace clang {
   public:
     TemplateDeclInstantiator(Sema &SemaRef, DeclContext *Owner,
                              const MultiLevelTemplateArgumentList &TemplateArgs)
-      : SemaRef(SemaRef), SubstIndex(SemaRef, -1), Owner(Owner), 
-        TemplateArgs(TemplateArgs), LateAttrs(0), StartingScope(0) { }
+      : SemaRef(SemaRef),
+        SubstIndex(SemaRef, SemaRef.ArgumentPackSubstitutionIndex),
+        Owner(Owner), TemplateArgs(TemplateArgs), LateAttrs(0), StartingScope(0)
+    { }
 
     // FIXME: Once we get closer to completion, replace these manually-written
     // declarations with automatically-generated ones from

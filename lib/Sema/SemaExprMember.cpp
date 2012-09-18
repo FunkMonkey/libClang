@@ -656,7 +656,7 @@ Sema::BuildMemberReferenceExpr(Expr *Base, QualType BaseType,
     }
 
     if (Result.get())
-      return move(Result);
+      return Result;
 
     // LookupMemberExpr can modify Base, and thus change BaseType
     BaseType = Base->getType();
@@ -1137,7 +1137,7 @@ Sema::LookupMemberExpr(LookupResult &R, ExprResult &BaseExpr,
         goto fail;
       // There's an implicit 'isa' ivar on all objects.
       // But we only actually find it this way on objects of type 'id',
-      // apparently.ghjg
+      // apparently.
       if (OTy->isObjCId() && Member->isStr("isa")) {
         Diag(MemberLoc, diag::warn_objc_isa_use);
         return Owned(new (Context) ObjCIsaExpr(BaseExpr.take(), IsArrow, MemberLoc,
@@ -1149,7 +1149,20 @@ Sema::LookupMemberExpr(LookupResult &R, ExprResult &BaseExpr,
                                 ObjCImpDecl, HasTemplateArgs);
       goto fail;
     }
-
+    else if (Member && Member->isStr("isa")) {
+      // If an ivar is (1) the first ivar in a root class and (2) named `isa`,
+      // then issue the same deprecated warning that id->isa gets.
+      ObjCInterfaceDecl *ClassDeclared = 0;
+      if (ObjCIvarDecl *IV = 
+            IDecl->lookupInstanceVariable(Member, ClassDeclared)) {
+        if (!ClassDeclared->getSuperClass()
+            && (*ClassDeclared->ivar_begin()) == IV) {
+          Diag(MemberLoc, diag::warn_objc_isa_use);
+          Diag(IV->getLocation(), diag::note_ivar_decl);
+        }
+      }
+    }
+    
     if (RequireCompleteType(OpLoc, BaseType, diag::err_typecheck_incomplete_tag,
                             BaseExpr.get()))
       return ExprError();
@@ -1237,6 +1250,7 @@ Sema::LookupMemberExpr(LookupResult &R, ExprResult &BaseExpr,
             << IV->getDeclName();
       }
     }
+    bool warn = true;
     if (getLangOpts().ObjCAutoRefCount) {
       Expr *BaseExp = BaseExpr.get()->IgnoreParenImpCasts();
       if (UnaryOperator *UO = dyn_cast<UnaryOperator>(BaseExp))
@@ -1244,10 +1258,20 @@ Sema::LookupMemberExpr(LookupResult &R, ExprResult &BaseExpr,
           BaseExp = UO->getSubExpr()->IgnoreParenCasts();
       
       if (DeclRefExpr *DE = dyn_cast<DeclRefExpr>(BaseExp))
-        if (DE->getType().getObjCLifetime() == Qualifiers::OCL_Weak)
+        if (DE->getType().getObjCLifetime() == Qualifiers::OCL_Weak) {
           Diag(DE->getLocation(), diag::error_arc_weak_ivar_access);
+          warn = false;
+        }
     }
-
+    if (warn) {
+      if (ObjCMethodDecl *MD = getCurMethodDecl()) {
+        ObjCMethodFamily MF = MD->getMethodFamily();
+        warn = (MF != OMF_init && MF != OMF_dealloc && 
+                MF != OMF_finalize);
+      }
+      if (warn)
+        Diag(MemberLoc, diag::warn_direct_ivar_access) << IV->getDeclName();
+    }
     return Owned(new (Context) ObjCIvarRefExpr(IV, IV->getType(),
                                                MemberLoc, BaseExpr.take(),
                                                IsArrow));
@@ -1353,9 +1377,6 @@ Sema::LookupMemberExpr(LookupResult &R, ExprResult &BaseExpr,
         // methods.
         Setter = IFace->lookupPrivateMethod(SetterSel, false);
       }
-      // Look through local category implementations associated with the class.
-      if (!Setter)
-        Setter = IFace->getCategoryClassMethod(SetterSel);
 
       if (Setter && DiagnoseUseOfDecl(Setter, MemberLoc))
         return ExprError();
@@ -1460,9 +1481,9 @@ Sema::LookupMemberExpr(LookupResult &R, ExprResult &BaseExpr,
 /// \param HasTrailingLParen whether the next token is '(', which
 ///   is used to diagnose mis-uses of special members that can
 ///   only be called
-/// \param ObjCImpDecl the current ObjC @implementation decl;
-///   this is an ugly hack around the fact that ObjC @implementations
-///   aren't properly put in the context chain
+/// \param ObjCImpDecl the current Objective-C \@implementation
+///   decl; this is an ugly hack around the fact that Objective-C
+///   \@implementations aren't properly put in the context chain
 ExprResult Sema::ActOnMemberAccessExpr(Scope *S, Expr *Base,
                                        SourceLocation OpLoc,
                                        tok::TokenKind OpKind,
@@ -1529,7 +1550,7 @@ ExprResult Sema::ActOnMemberAccessExpr(Scope *S, Expr *Base,
           Id.getKind() == UnqualifiedId::IK_DestructorName)
         return DiagnoseDtorReference(NameInfo.getLoc(), Result.get());
 
-      return move(Result);
+      return Result;
     }
 
     ActOnMemberAccessExtraArgs ExtraArgs = {S, Id, ObjCImpDecl, HasTrailingLParen};
@@ -1539,7 +1560,7 @@ ExprResult Sema::ActOnMemberAccessExpr(Scope *S, Expr *Base,
                                       false, &ExtraArgs);
   }
 
-  return move(Result);
+  return Result;
 }
 
 static ExprResult

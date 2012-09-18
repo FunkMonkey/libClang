@@ -899,7 +899,7 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
     if (!Ctx && S->isTemplateParamScope() && OutsideOfTemplateParamDC &&
         S->getParent() && !S->getParent()->isTemplateParamScope()) {
       // We've just searched the last template parameter scope and
-      // found nothing, so look into the the contexts between the
+      // found nothing, so look into the contexts between the
       // lexical and semantic declaration contexts returned by
       // findOuterContext(). This implements the name lookup behavior
       // of C++ [temp.local]p8.
@@ -1004,7 +1004,7 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
     if (!Ctx && S->isTemplateParamScope() && OutsideOfTemplateParamDC &&
         S->getParent() && !S->getParent()->isTemplateParamScope()) {
       // We've just searched the last template parameter scope and
-      // found nothing, so look into the the contexts between the
+      // found nothing, so look into the contexts between the
       // lexical and semantic declaration contexts returned by
       // findOuterContext(). This implements the name lookup behavior
       // of C++ [temp.local]p8.
@@ -1100,15 +1100,12 @@ static NamedDecl *getVisibleDecl(NamedDecl *D) {
 /// begin. If the lookup criteria permits, name lookup may also search
 /// in the parent scopes.
 ///
-/// @param Name     The name of the entity that we are searching for.
+/// @param [in,out] R Specifies the lookup to perform (e.g., the name to
+/// look up and the lookup kind), and is updated with the results of lookup
+/// including zero or more declarations and possibly additional information
+/// used to diagnose ambiguities.
 ///
-/// @param Loc      If provided, the source location where we're performing
-/// name lookup. At present, this is only used to produce diagnostics when
-/// C library functions (like "malloc") are implicitly declared.
-///
-/// @returns The result of name lookup, which includes zero or more
-/// declarations and possibly additional information used to diagnose
-/// ambiguities.
+/// @returns \c true if lookup succeeded and false otherwise.
 bool Sema::LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation) {
   DeclarationName Name = R.getLookupName();
   if (!Name) return false;
@@ -1231,7 +1228,7 @@ bool Sema::LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation) {
 /// using directives by the given context.
 ///
 /// C++98 [namespace.qual]p2:
-///   Given X::m (where X is a user-declared namespace), or given ::m
+///   Given X::m (where X is a user-declared namespace), or given \::m
 ///   (where X is the global namespace), let S be the set of all
 ///   declarations of m in X and in the transitive closure of all
 ///   namespaces nominated by using-directives in X and its used
@@ -1244,6 +1241,7 @@ bool Sema::LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation) {
 ///   (namespace.udecl), S is the required set of declarations of
 ///   m. Otherwise if the use of m is not one that allows a unique
 ///   declaration to be chosen from S, the program is ill-formed.
+///
 /// C++98 [namespace.qual]p5:
 ///   During the lookup of a qualified namespace member name, if the
 ///   lookup finds more than one declaration of the member, and if one
@@ -1636,22 +1634,12 @@ bool Sema::LookupParsedName(LookupResult &R, Scope *S, CXXScopeSpec *SS,
 }
 
 
-/// @brief Produce a diagnostic describing the ambiguity that resulted
+/// \brief Produce a diagnostic describing the ambiguity that resulted
 /// from name lookup.
 ///
-/// @param Result       The ambiguous name lookup result.
+/// \param Result The result of the ambiguous lookup to be diagnosed.
 ///
-/// @param Name         The name of the entity that name lookup was
-/// searching for.
-///
-/// @param NameLoc      The location of the name within the source code.
-///
-/// @param LookupRange  A source range that provides more
-/// source-location information concerning the lookup itself. For
-/// example, this range might highlight a nested-name-specifier that
-/// precedes the name.
-///
-/// @returns true
+/// \returns true
 bool Sema::DiagnoseAmbiguousLookup(LookupResult &Result) {
   assert(Result.isAmbiguous() && "Lookup result must be ambiguous");
 
@@ -1737,15 +1725,17 @@ bool Sema::DiagnoseAmbiguousLookup(LookupResult &Result) {
 
 namespace {
   struct AssociatedLookup {
-    AssociatedLookup(Sema &S,
+    AssociatedLookup(Sema &S, SourceLocation InstantiationLoc,
                      Sema::AssociatedNamespaceSet &Namespaces,
                      Sema::AssociatedClassSet &Classes)
-      : S(S), Namespaces(Namespaces), Classes(Classes) {
+      : S(S), Namespaces(Namespaces), Classes(Classes),
+        InstantiationLoc(InstantiationLoc) {
     }
 
     Sema &S;
     Sema::AssociatedNamespaceSet &Namespaces;
     Sema::AssociatedClassSet &Classes;
+    SourceLocation InstantiationLoc;
   };
 }
 
@@ -1876,8 +1866,10 @@ addAssociatedClassesAndNamespaces(AssociatedLookup &Result,
 
   // Only recurse into base classes for complete types.
   if (!Class->hasDefinition()) {
-    // FIXME: we might need to instantiate templates here
-    return;
+    QualType type = Result.S.Context.getTypeDeclType(Class);
+    if (Result.S.RequireCompleteType(Result.InstantiationLoc, type,
+                                     /*no diagnostic*/ 0))
+      return;
   }
 
   // Add direct and indirect base classes along with their associated
@@ -2081,13 +2073,15 @@ addAssociatedClassesAndNamespaces(AssociatedLookup &Result, QualType Ty) {
 /// namespaces searched by argument-dependent lookup
 /// (C++ [basic.lookup.argdep]) for a given set of arguments.
 void
-Sema::FindAssociatedClassesAndNamespaces(llvm::ArrayRef<Expr *> Args,
+Sema::FindAssociatedClassesAndNamespaces(SourceLocation InstantiationLoc,
+                                         llvm::ArrayRef<Expr *> Args,
                                  AssociatedNamespaceSet &AssociatedNamespaces,
                                  AssociatedClassSet &AssociatedClasses) {
   AssociatedNamespaces.clear();
   AssociatedClasses.clear();
 
-  AssociatedLookup Result(*this, AssociatedNamespaces, AssociatedClasses);
+  AssociatedLookup Result(*this, InstantiationLoc,
+                          AssociatedNamespaces, AssociatedClasses);
 
   // C++ [basic.lookup.koenig]p2:
   //   For each argument type T in the function call, there is a set
@@ -2444,10 +2438,11 @@ CXXConstructorDecl *Sema::LookupCopyingConstructor(CXXRecordDecl *Class,
 }
 
 /// \brief Look up the moving constructor for the given class.
-CXXConstructorDecl *Sema::LookupMovingConstructor(CXXRecordDecl *Class) {
+CXXConstructorDecl *Sema::LookupMovingConstructor(CXXRecordDecl *Class,
+                                                  unsigned Quals) {
   SpecialMemberOverloadResult *Result =
-    LookupSpecialMember(Class, CXXMoveConstructor, false,
-                        false, false, false, false);
+    LookupSpecialMember(Class, CXXMoveConstructor, Quals & Qualifiers::Const,
+                        Quals & Qualifiers::Volatile, false, false, false);
 
   return cast_or_null<CXXConstructorDecl>(Result->getMethod());
 }
@@ -2488,12 +2483,14 @@ CXXMethodDecl *Sema::LookupCopyingAssignment(CXXRecordDecl *Class,
 
 /// \brief Look up the moving assignment operator for the given class.
 CXXMethodDecl *Sema::LookupMovingAssignment(CXXRecordDecl *Class,
+                                            unsigned Quals,
                                             bool RValueThis,
                                             unsigned ThisQuals) {
   assert(!(ThisQuals & ~(Qualifiers::Const | Qualifiers::Volatile)) &&
          "non-const, non-volatile qualifiers for copy assignment this");
   SpecialMemberOverloadResult *Result =
-    LookupSpecialMember(Class, CXXMoveAssignment, false, false, RValueThis,
+    LookupSpecialMember(Class, CXXMoveAssignment, Quals & Qualifiers::Const,
+                        Quals & Qualifiers::Volatile, RValueThis,
                         ThisQuals & Qualifiers::Const,
                         ThisQuals & Qualifiers::Volatile);
 
@@ -2657,7 +2654,7 @@ void Sema::ArgumentDependentLookup(DeclarationName Name, bool Operator,
   // arguments we have.
   AssociatedNamespaceSet AssociatedNamespaces;
   AssociatedClassSet AssociatedClasses;
-  FindAssociatedClassesAndNamespaces(Args,
+  FindAssociatedClassesAndNamespaces(Loc, Args,
                                      AssociatedNamespaces,
                                      AssociatedClasses);
   if (StdNamespaceIsAssociated && StdNamespace)
@@ -2669,13 +2666,6 @@ void Sema::ArgumentDependentLookup(DeclarationName Name, bool Operator,
     if (Args.size() >= 2)
       T2 = Args[1]->getType();
   }
-
-  // Try to complete all associated classes, in case they contain a
-  // declaration of a friend function.
-  for (AssociatedClassSet::iterator C = AssociatedClasses.begin(),
-                                    CEnd = AssociatedClasses.end();
-       C != CEnd; ++C)
-    RequireCompleteType(Loc, Context.getRecordType(*C), 0);
 
   // C++ [basic.lookup.argdep]p3:
   //   Let X be the lookup set produced by unqualified lookup (3.4.1)
@@ -3533,7 +3523,16 @@ static void LookupPotentialTypoResult(Sema &SemaRef,
 /// \brief Add keywords to the consumer as possible typo corrections.
 static void AddKeywordsToConsumer(Sema &SemaRef,
                                   TypoCorrectionConsumer &Consumer,
-                                  Scope *S, CorrectionCandidateCallback &CCC) {
+                                  Scope *S, CorrectionCandidateCallback &CCC,
+                                  bool AfterNestedNameSpecifier) {
+  if (AfterNestedNameSpecifier) {
+    // For 'X::', we know exactly which keywords can appear next.
+    Consumer.addKeywordResult("template");
+    if (CCC.WantExpressionKeywords)
+      Consumer.addKeywordResult("operator");
+    return;
+  }
+
   if (CCC.WantObjCSuper)
     Consumer.addKeywordResult("super");
 
@@ -3606,6 +3605,12 @@ static void AddKeywordsToConsumer(Sema &SemaRef,
         Consumer.addKeywordResult("alignof");
         Consumer.addKeywordResult("nullptr");
       }
+    }
+
+    if (SemaRef.getLangOpts().C11) {
+      // FIXME: We should not suggest _Alignof if the alignof macro
+      // is present.
+      Consumer.addKeywordResult("_Alignof");
     }
   }
 
@@ -3823,7 +3828,7 @@ TypoCorrection Sema::CorrectTypo(const DeclarationNameInfo &TypoName,
     }
   }
 
-  AddKeywordsToConsumer(*this, Consumer, S, CCC);
+  AddKeywordsToConsumer(*this, Consumer, S, CCC, SS && SS->isNotEmpty());
 
   // If we haven't found anything, we're done.
   if (Consumer.empty()) {
@@ -3889,13 +3894,13 @@ TypoCorrection Sema::CorrectTypo(const DeclarationNameInfo &TypoName,
       // If a validator callback object was given, drop the correction
       // unless it passes validation.
       bool Viable = false;
-      for (TypoResultList::iterator RI = I->second.begin(), RIEnd = I->second.end();
-           RI != RIEnd; /* Increment in loop. */) {
+      for (TypoResultList::iterator RI = I->second.begin();
+           RI != I->second.end(); /* Increment in loop. */) {
         TypoResultList::iterator Prev = RI;
         ++RI;
         if (Prev->isResolved()) {
           if (!isCandidateViable(CCC, *Prev))
-            I->second.erase(Prev);
+            RI = I->second.erase(Prev);
           else
             Viable = true;
         }

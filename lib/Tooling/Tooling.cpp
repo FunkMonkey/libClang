@@ -19,7 +19,6 @@
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/Tool.h"
 #include "clang/Frontend/CompilerInstance.h"
-#include "clang/Frontend/FrontendAction.h"
 #include "clang/Frontend/FrontendDiagnostic.h"
 #include "clang/Frontend/TextDiagnosticPrinter.h"
 #include "llvm/ADT/STLExtras.h"
@@ -98,17 +97,22 @@ static clang::CompilerInvocation *newInvocation(
 
 bool runToolOnCode(clang::FrontendAction *ToolAction, const Twine &Code,
                    const Twine &FileName) {
+  return runToolOnCodeWithArgs(
+      ToolAction, Code, std::vector<std::string>(), FileName);
+}
+
+bool runToolOnCodeWithArgs(clang::FrontendAction *ToolAction, const Twine &Code,
+                           const std::vector<std::string> &Args,
+                           const Twine &FileName) {
   SmallString<16> FileNameStorage;
   StringRef FileNameRef = FileName.toNullTerminatedStringRef(FileNameStorage);
-  const char *const CommandLine[] = {
-      "clang-tool", "-fsyntax-only", FileNameRef.data()
-  };
+  std::vector<std::string> Commands;
+  Commands.push_back("clang-tool");
+  Commands.push_back("-fsyntax-only");
+  Commands.insert(Commands.end(), Args.begin(), Args.end());
+  Commands.push_back(FileNameRef.data());
   FileManager Files((FileSystemOptions()));
-  ToolInvocation Invocation(
-      std::vector<std::string>(
-          CommandLine,
-          CommandLine + llvm::array_lengthof(CommandLine)),
-      ToolAction, &Files);
+  ToolInvocation Invocation(Commands, ToolAction, &Files);
 
   SmallString<1024> CodeStorage;
   Invocation.mapVirtualFile(FileNameRef,
@@ -116,20 +120,13 @@ bool runToolOnCode(clang::FrontendAction *ToolAction, const Twine &Code,
   return Invocation.run();
 }
 
-/// \brief Returns the absolute path of 'File', by prepending it with
-/// 'BaseDirectory' if 'File' is not absolute.
-///
-/// Otherwise returns 'File'.
-/// If 'File' starts with "./", the returned path will not contain the "./".
-/// Otherwise, the returned path will contain the literal path-concatenation of
-/// 'BaseDirectory' and 'File'.
-///
-/// \param File Either an absolute or relative path.
-/// \param BaseDirectory An absolute path.
-static std::string getAbsolutePath(
-    StringRef File, StringRef BaseDirectory) {
+std::string getAbsolutePath(StringRef File) {
+  llvm::SmallString<1024> BaseDirectory;
+  if (const char *PWD = ::getenv("PWD"))
+    BaseDirectory = PWD;
+  else
+    llvm::sys::fs::current_path(BaseDirectory);
   SmallString<1024> PathStorage;
-  assert(llvm::sys::path::is_absolute(BaseDirectory));
   if (llvm::sys::path::is_absolute(File)) {
     llvm::sys::path::native(File, PathStorage);
     return PathStorage.str();
@@ -220,6 +217,7 @@ bool ToolInvocation::runInvocation(
   const bool Success = Compiler.ExecuteAction(*ScopedToolAction);
 
   Compiler.resetAndLeakFileManager();
+  Files->clearStatCaches();
   return Success;
 }
 
@@ -241,14 +239,8 @@ ClangTool::ClangTool(const CompilationDatabase &Compilations,
                      ArrayRef<std::string> SourcePaths)
     : Files((FileSystemOptions())),
       ArgsAdjuster(new ClangSyntaxOnlyAdjuster()) {
-  llvm::SmallString<1024> BaseDirectory;
-  if (const char *PWD = ::getenv("PWD"))
-    BaseDirectory = PWD;
-  else
-    llvm::sys::fs::current_path(BaseDirectory);
   for (unsigned I = 0, E = SourcePaths.size(); I != E; ++I) {
-    llvm::SmallString<1024> File(getAbsolutePath(
-        SourcePaths[I], BaseDirectory));
+    llvm::SmallString<1024> File(getAbsolutePath(SourcePaths[I]));
 
     std::vector<CompileCommand> CompileCommandsForFile =
       Compilations.getCompileCommands(File.str());

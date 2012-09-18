@@ -222,8 +222,7 @@ public:
     /// immediately-enclosing context of the cleanup scope.  For
     /// EH cleanups, this is run in a terminate context.
     ///
-    // \param IsForEHCleanup true if this is for an EH cleanup, false
-    ///  if for a normal cleanup.
+    // \param flags cleanup kind.
     virtual void Emit(CodeGenFunction &CGF, Flags flags) = 0;
   };
 
@@ -533,8 +532,8 @@ public:
 /// CodeGenFunction - This class organizes the per-function state that is used
 /// while generating LLVM code.
 class CodeGenFunction : public CodeGenTypeCache {
-  CodeGenFunction(const CodeGenFunction&); // DO NOT IMPLEMENT
-  void operator=(const CodeGenFunction&);  // DO NOT IMPLEMENT
+  CodeGenFunction(const CodeGenFunction &) LLVM_DELETED_FUNCTION;
+  void operator=(const CodeGenFunction &) LLVM_DELETED_FUNCTION;
 
   friend class CGCXXABI;
 public:
@@ -795,8 +794,8 @@ public:
     bool OldDidCallStackSave;
     bool PerformCleanup;
 
-    RunCleanupsScope(const RunCleanupsScope &); // DO NOT IMPLEMENT
-    RunCleanupsScope &operator=(const RunCleanupsScope &); // DO NOT IMPLEMENT
+    RunCleanupsScope(const RunCleanupsScope &) LLVM_DELETED_FUNCTION;
+    void operator=(const RunCleanupsScope &) LLVM_DELETED_FUNCTION;
 
   protected:
     CodeGenFunction& CGF;
@@ -839,8 +838,8 @@ public:
     SourceRange Range;
     bool PopDebugStack;
 
-    LexicalScope(const LexicalScope &); // DO NOT IMPLEMENT THESE
-    LexicalScope &operator=(const LexicalScope &);
+    LexicalScope(const LexicalScope &) LLVM_DELETED_FUNCTION;
+    void operator=(const LexicalScope &) LLVM_DELETED_FUNCTION;
 
   public:
     /// \brief Enter a new cleanup scope.
@@ -1197,8 +1196,18 @@ private:
   llvm::BasicBlock *TerminateHandler;
   llvm::BasicBlock *TrapBB;
 
+  /// Add a kernel metadata node to the named metadata node 'opencl.kernels'.
+  /// In the kernel metadata node, reference the kernel function and metadata 
+  /// nodes for its optional attribute qualifiers (OpenCL 1.1 6.7.2):
+  /// - A node for the work_group_size_hint(X,Y,Z) qualifier contains string 
+  ///   "work_group_size_hint", and three 32-bit integers X, Y and Z.
+  /// - A node for the reqd_work_group_size(X,Y,Z) qualifier contains string 
+  ///   "reqd_work_group_size", and three 32-bit integers X, Y and Z.
+  void EmitOpenCLKernelMetadata(const FunctionDecl *FD, 
+                                llvm::Function *Fn);
+
 public:
-  CodeGenFunction(CodeGenModule &cgm);
+  CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext=false);
   ~CodeGenFunction();
 
   CodeGenTypes &getTypes() const { return CGM.getTypes(); }
@@ -1566,6 +1575,7 @@ public:
     return LValue::MakeAddr(V, T, Alignment, getContext(),
                             CGM.getTBAAInfo(T));
   }
+
   LValue MakeNaturalAlignAddrLValue(llvm::Value *V, QualType T) {
     CharUnits Alignment;
     if (!T->isIncompleteType())
@@ -1620,10 +1630,10 @@ public:
   /// aggregate expression, the aggloc/agglocvolatile arguments indicate where
   /// the result should be returned.
   ///
-  /// \param IgnoreResult - True if the resulting value isn't used.
+  /// \param ignoreResult True if the resulting value isn't used.
   RValue EmitAnyExpr(const Expr *E,
-                     AggValueSlot AggSlot = AggValueSlot::ignored(),
-                     bool IgnoreResult = false);
+                     AggValueSlot aggSlot = AggValueSlot::ignored(),
+                     bool ignoreResult = false);
 
   // EmitVAListRef - Emit a "reference" to a va_list; this is either the address
   // or the value of the expression, depending on how va_list is defined.
@@ -1649,7 +1659,7 @@ public:
   /// volatile.
   void EmitAggregateCopy(llvm::Value *DestPtr, llvm::Value *SrcPtr,
                          QualType EltTy, bool isVolatile=false,
-                         unsigned Alignment = 0);
+                         CharUnits Alignment = CharUnits::Zero());
 
   /// StartBlock - Start new block named N. If insert block is a dummy block
   /// then reuse it.
@@ -1823,7 +1833,29 @@ public:
   void EmitStdInitializerListCleanup(llvm::Value *loc,
                                      const InitListExpr *init);
 
-  void EmitCheck(llvm::Value *, unsigned Size);
+  /// \brief Situations in which we might emit a check for the suitability of a
+  ///        pointer or glvalue.
+  enum TypeCheckKind {
+    /// Checking the operand of a load. Must be suitably sized and aligned.
+    TCK_Load,
+    /// Checking the destination of a store. Must be suitably sized and aligned.
+    TCK_Store,
+    /// Checking the bound value in a reference binding. Must be suitably sized
+    /// and aligned, but is not required to refer to an object (until the
+    /// reference is used), per core issue 453.
+    TCK_ReferenceBinding,
+    /// Checking the object expression in a non-static data member access. Must
+    /// be an object within its lifetime.
+    TCK_MemberAccess,
+    /// Checking the 'this' pointer for a call to a non-static member function.
+    /// Must be an object within its lifetime.
+    TCK_MemberCall
+  };
+
+  /// \brief Emit a check that \p V is the address of storage of the
+  /// appropriate size and alignment for an object of type \p Type.
+  void EmitTypeCheck(TypeCheckKind TCK, llvm::Value *V,
+                     QualType Type, CharUnits Alignment = CharUnits::Zero());
 
   llvm::Value *EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
                                        bool isInc, bool isPre);
@@ -2021,11 +2053,10 @@ public:
   ///
   LValue EmitLValue(const Expr *E);
 
-  /// EmitCheckedLValue - Same as EmitLValue but additionally we generate
-  /// checking code to guard against undefined behavior.  This is only
-  /// suitable when we know that the address will be used to access the
-  /// object.
-  LValue EmitCheckedLValue(const Expr *E);
+  /// \brief Same as EmitLValue but additionally we generate checking code to
+  /// guard against undefined behavior.  This is only suitable when we know
+  /// that the address will be used to access the object.
+  LValue EmitCheckedLValue(const Expr *E, TypeCheckKind TCK);
 
   /// EmitToMemory - Change a scalar value from its value
   /// representation to its in-memory representation.
@@ -2150,9 +2181,6 @@ public:
 
   llvm::Value *EmitIvarOffset(const ObjCInterfaceDecl *Interface,
                               const ObjCIvarDecl *Ivar);
-  LValue EmitLValueForAnonRecordField(llvm::Value* Base,
-                                      const IndirectFieldDecl* Field,
-                                      unsigned CVRQualifiers);
   LValue EmitLValueForField(LValue Base, const FieldDecl* Field);
 
   /// EmitLValueForFieldInitialization - Like EmitLValueForField, except that
@@ -2164,9 +2192,6 @@ public:
   LValue EmitLValueForIvar(QualType ObjectTy,
                            llvm::Value* Base, const ObjCIvarDecl *Ivar,
                            unsigned CVRQualifiers);
-
-  LValue EmitLValueForBitfield(llvm::Value* Base, const FieldDecl* Field,
-                                unsigned CVRQualifiers);
 
   LValue EmitCXXConstructLValue(const CXXConstructExpr *E);
   LValue EmitCXXBindTemporaryLValue(const CXXBindTemporaryExpr *E);
@@ -2266,7 +2291,6 @@ public:
 
   llvm::Value *BuildVector(ArrayRef<llvm::Value*> Ops);
   llvm::Value *EmitX86BuiltinExpr(unsigned BuiltinID, const CallExpr *E);
-  llvm::Value *EmitHexagonBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
   llvm::Value *EmitPPCBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
 
   llvm::Value *EmitObjCProtocolExpr(const ObjCProtocolExpr *E);
@@ -2366,7 +2390,7 @@ public:
   /// EmitAggExpr - Emit the computation of the specified expression
   /// of aggregate type.  The result is computed into the given slot,
   /// which may be null to indicate that the value is not needed.
-  void EmitAggExpr(const Expr *E, AggValueSlot AS, bool IgnoreResult = false);
+  void EmitAggExpr(const Expr *E, AggValueSlot AS);
 
   /// EmitAggExprToLValue - Emit the computation of the specified expression of
   /// aggregate type into a temporary LValue.
@@ -2503,7 +2527,7 @@ public:
   /// ConstantFoldsToSimpleInteger - If the specified expression does not fold
   /// to a constant, or if it does but contains a label, return false.  If it
   /// constant folds return true and set the folded value.
-  bool ConstantFoldsToSimpleInteger(const Expr *Cond, llvm::APInt &Result);
+  bool ConstantFoldsToSimpleInteger(const Expr *Cond, llvm::APSInt &Result);
   
   /// EmitBranchOnBoolExpr - Emit a branch on a boolean condition (e.g. for an
   /// if statement) to the specified blocks.  Based on the condition, this might
@@ -2511,9 +2535,9 @@ public:
   void EmitBranchOnBoolExpr(const Expr *Cond, llvm::BasicBlock *TrueBlock,
                             llvm::BasicBlock *FalseBlock);
 
-  /// getTrapBB - Create a basic block that will call the trap intrinsic.  We'll
-  /// generate a branch around the created basic block as necessary.
-  llvm::BasicBlock *getTrapBB();
+  /// \brief Create a basic block that will call the trap intrinsic, and emit a
+  /// conditional branch to it.
+  void EmitCheck(llvm::Value *Checked);
 
   /// EmitCallArg - Emit a single call argument.
   void EmitCallArg(CallArgList &args, const Expr *E, QualType ArgType);
@@ -2548,12 +2572,10 @@ private:
                         SmallVector<llvm::Value*, 16> &Args,
                         llvm::FunctionType *IRFuncTy);
 
-  llvm::Value* EmitAsmInput(const AsmStmt &S,
-                            const TargetInfo::ConstraintInfo &Info,
+  llvm::Value* EmitAsmInput(const TargetInfo::ConstraintInfo &Info,
                             const Expr *InputExpr, std::string &ConstraintStr);
 
-  llvm::Value* EmitAsmInputLValue(const AsmStmt &S,
-                                  const TargetInfo::ConstraintInfo &Info,
+  llvm::Value* EmitAsmInputLValue(const TargetInfo::ConstraintInfo &Info,
                                   LValue InputValue, QualType InputType,
                                   std::string &ConstraintStr);
 
@@ -2619,15 +2641,9 @@ private:
 
   void AddObjCARCExceptionMetadata(llvm::Instruction *Inst);
 
-  /// GetPointeeAlignment - Given an expression with a pointer type, find the
-  /// alignment of the type referenced by the pointer.  Skip over implicit
-  /// casts.
-  unsigned GetPointeeAlignment(const Expr *Addr);
-
-  /// GetPointeeAlignmentValue - Given an expression with a pointer type, find
-  /// the alignment of the type referenced by the pointer.  Skip over implicit
-  /// casts.  Return the alignment as an llvm::Value.
-  llvm::Value *GetPointeeAlignmentValue(const Expr *Addr);
+  /// GetPointeeAlignment - Given an expression with a pointer type, emit the
+  /// value and compute our best estimate of the alignment of the pointee.
+  std::pair<llvm::Value*, unsigned> EmitPointerWithAlignment(const Expr *Addr);
 };
 
 /// Helper class with most of the code for saving a value for a

@@ -149,8 +149,8 @@ public:
   bool shouldWalkTypesOfTypeLocs() const { return true; }
 
   /// \brief Return whether this visitor should recurse into implicit
-  /// declarations, e.g., implicit constructors and destructors.
-  bool shouldVisitImplicitDeclarations() const { return false; }
+  /// code, e.g., implicit constructors and destructors.
+  bool shouldVisitImplicitCode() const { return false; }
 
   /// \brief Return whether \param S should be traversed using data recursion
   /// to avoid a stack overflow with extreme cases.
@@ -464,12 +464,19 @@ template<typename Derived>
 bool RecursiveASTVisitor<Derived>::dataTraverseNode(Stmt *S,
                                                     bool &EnqueueChildren) {
 
+// The cast for DISPATCH_WALK is needed for older versions of g++, but causes
+// problems for MSVC.  So we'll skip the cast entirely for MSVC.
+#if defined(_MSC_VER)
+  #define GCC_CAST(CLASS)
+#else
+  #define GCC_CAST(CLASS) (bool (RecursiveASTVisitor::*)(CLASS*))
+#endif
+
   // Dispatch to the corresponding WalkUpFrom* function only if the derived
   // class didn't override Traverse* (and thus the traversal is trivial).
-  // The cast here is necessary to work around a bug in old versions of g++.
 #define DISPATCH_WALK(NAME, CLASS, VAR) \
   if (&RecursiveASTVisitor::Traverse##NAME == \
-      (bool (RecursiveASTVisitor::*)(CLASS*))&Derived::Traverse##NAME) \
+      GCC_CAST(CLASS)&Derived::Traverse##NAME) \
     return getDerived().WalkUpFrom##NAME(static_cast<CLASS*>(VAR)); \
   EnqueueChildren = false; \
   return getDerived().Traverse##NAME(static_cast<CLASS*>(VAR));
@@ -509,6 +516,7 @@ bool RecursiveASTVisitor<Derived>::dataTraverseNode(Stmt *S,
   }
 
 #undef DISPATCH_WALK
+#undef GCC_CAST
 
   return true;
 }
@@ -607,7 +615,7 @@ bool RecursiveASTVisitor<Derived>::TraverseDecl(Decl *D) {
 
   // As a syntax visitor, by default we want to ignore declarations for
   // implicit declarations (ones not typed explicitly by the user).
-  if (!getDerived().shouldVisitImplicitDeclarations() && D->isImplicit())
+  if (!getDerived().shouldVisitImplicitCode() && D->isImplicit())
     return true;
 
   switch (D->getKind()) {
@@ -791,7 +799,7 @@ bool RecursiveASTVisitor<Derived>::TraverseConstructorInitializer(
   if (TypeSourceInfo *TInfo = Init->getTypeSourceInfo())
     TRY_TO(TraverseTypeLoc(TInfo->getTypeLoc()));
 
-  if (Init->isWritten())
+  if (Init->isWritten() || getDerived().shouldVisitImplicitCode())
     TRY_TO(TraverseStmt(Init->getInit()));
   return true;
 }
@@ -1283,7 +1291,13 @@ DEF_TRAVERSE_DECL(FriendTemplateDecl, {
   })
 
 DEF_TRAVERSE_DECL(ClassScopeFunctionSpecializationDecl, {
-  TRY_TO(TraverseDecl(D->getSpecialization()));
+    TRY_TO(TraverseDecl(D->getSpecialization()));
+
+    if (D->hasExplicitTemplateArgs()) {
+      const TemplateArgumentListInfo& args = D->templateArgs();
+      TRY_TO(TraverseTemplateArgumentLocsHelper(
+          args.getArgumentArray(), args.size()));
+    }
  })
 
 DEF_TRAVERSE_DECL(LinkageSpecDecl, { })
@@ -1755,7 +1769,8 @@ template<typename Derived>
 bool RecursiveASTVisitor<Derived>::TraverseVarHelper(VarDecl *D) {
   TRY_TO(TraverseDeclaratorHelper(D));
   // Default params are taken care of when we traverse the ParmVarDecl.
-  if (!isa<ParmVarDecl>(D))
+  if (!isa<ParmVarDecl>(D) &&
+      (!D->isCXXForRangeDecl() || getDerived().shouldVisitImplicitCode()))
     TRY_TO(TraverseStmt(D->getInit()));
   return true;
 }
@@ -1812,7 +1827,7 @@ bool RecursiveASTVisitor<Derived>::Traverse##STMT (STMT *S) {           \
   return true;                                                          \
 }
 
-DEF_TRAVERSE_STMT(AsmStmt, {
+DEF_TRAVERSE_STMT(GCCAsmStmt, {
     TRY_TO(TraverseStmt(S->getAsmString()));
     for (unsigned I = 0, E = S->getNumInputs(); I < E; ++I) {
       TRY_TO(TraverseStmt(S->getInputConstraintLiteral(I)));
@@ -1821,9 +1836,14 @@ DEF_TRAVERSE_STMT(AsmStmt, {
       TRY_TO(TraverseStmt(S->getOutputConstraintLiteral(I)));
     }
     for (unsigned I = 0, E = S->getNumClobbers(); I < E; ++I) {
-      TRY_TO(TraverseStmt(S->getClobber(I)));
+      TRY_TO(TraverseStmt(S->getClobberStringLiteral(I)));
     }
     // children() iterates over inputExpr and outputExpr.
+  })
+
+DEF_TRAVERSE_STMT(MSAsmStmt, { 
+    // FIXME: MS Asm doesn't currently parse Constraints, Clobbers, etc.  Once
+    // added this needs to be implemented.
   })
 
 DEF_TRAVERSE_STMT(CXXCatchStmt, {
@@ -1868,7 +1888,15 @@ DEF_TRAVERSE_STMT(ObjCAtThrowStmt, { })
 DEF_TRAVERSE_STMT(ObjCAtTryStmt, { })
 DEF_TRAVERSE_STMT(ObjCForCollectionStmt, { })
 DEF_TRAVERSE_STMT(ObjCAutoreleasePoolStmt, { })
-DEF_TRAVERSE_STMT(CXXForRangeStmt, { })
+DEF_TRAVERSE_STMT(CXXForRangeStmt, {
+  if (!getDerived().shouldVisitImplicitCode()) {
+    TRY_TO(TraverseStmt(S->getLoopVarStmt()));
+    TRY_TO(TraverseStmt(S->getRangeInit()));
+    TRY_TO(TraverseStmt(S->getBody()));
+    // Visit everything else only if shouldVisitImplicitCode().
+    return true;
+  }
+})
 DEF_TRAVERSE_STMT(MSDependentExistsStmt, {
     TRY_TO(TraverseNestedNameSpecifierLoc(S->getQualifierLoc()));
     TRY_TO(TraverseDeclarationNameInfo(S->getNameInfo()));
@@ -2113,7 +2141,9 @@ DEF_TRAVERSE_STMT(BlockExpr, {
   return true; // no child statements to loop through.
 })
 DEF_TRAVERSE_STMT(ChooseExpr, { })
-DEF_TRAVERSE_STMT(CompoundLiteralExpr, { })
+DEF_TRAVERSE_STMT(CompoundLiteralExpr, {
+  TRY_TO(TraverseTypeLoc(S->getTypeSourceInfo()->getTypeLoc()));
+})
 DEF_TRAVERSE_STMT(CXXBindTemporaryExpr, { })
 DEF_TRAVERSE_STMT(CXXBoolLiteralExpr, { })
 DEF_TRAVERSE_STMT(CXXDefaultArgExpr, { })
@@ -2191,6 +2221,7 @@ DEF_TRAVERSE_STMT(PackExpansionExpr, { })
 DEF_TRAVERSE_STMT(SizeOfPackExpr, { })
 DEF_TRAVERSE_STMT(SubstNonTypeTemplateParmPackExpr, { })
 DEF_TRAVERSE_STMT(SubstNonTypeTemplateParmExpr, { })
+DEF_TRAVERSE_STMT(FunctionParmPackExpr, { })
 DEF_TRAVERSE_STMT(MaterializeTemporaryExpr, { })
 DEF_TRAVERSE_STMT(AtomicExpr, { })
 

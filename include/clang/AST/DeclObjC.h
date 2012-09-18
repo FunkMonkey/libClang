@@ -33,8 +33,8 @@ class ObjCPropertyImplDecl;
 class CXXCtorInitializer;
 
 class ObjCListBase {
-  void operator=(const ObjCListBase &);     // DO NOT IMPLEMENT
-  ObjCListBase(const ObjCListBase&);        // DO NOT IMPLEMENT
+  ObjCListBase(const ObjCListBase &) LLVM_DELETED_FUNCTION;
+  void operator=(const ObjCListBase &) LLVM_DELETED_FUNCTION;
 protected:
   /// List is an array of pointers to objects that are not owned by this object.
   void **List;
@@ -171,7 +171,7 @@ private:
   unsigned NumParams;
 
   /// List of attributes for this method declaration.
-  SourceLocation EndLoc; // the location of the ';' or '}'.
+  SourceLocation DeclEndLoc; // the location of the ';' or '{'.
 
   // The following are only used for method definitions, null otherwise.
   // FIXME: space savings opportunity, consider a sub-class.
@@ -242,7 +242,7 @@ private:
     SelLocsKind(SelLoc_StandardNoSpace), IsOverriding(0),
     MethodDeclType(T), ResultTInfo(ResultTInfo),
     ParamsAndSelLocs(0), NumParams(0),
-    EndLoc(endLoc), Body(0), SelfDecl(0), CmdDecl(0) {
+    DeclEndLoc(endLoc), Body(0), SelfDecl(0), CmdDecl(0) {
     setImplicit(isImplicitlyDeclared);
   }
 
@@ -290,12 +290,16 @@ public:
   bool isRedeclaration() const { return IsRedeclaration; }
   void setAsRedeclaration(const ObjCMethodDecl *PrevMethod);
 
+  /// \brief Returns the location where the declarator ends. It will be
+  /// the location of ';' for a method declaration and the location of '{'
+  /// for a method definition.
+  SourceLocation getDeclaratorEndLoc() const { return DeclEndLoc; }
+
   // Location information, modeled after the Stmt API.
   SourceLocation getLocStart() const LLVM_READONLY { return getLocation(); }
-  SourceLocation getLocEnd() const LLVM_READONLY { return EndLoc; }
-  void setEndLoc(SourceLocation Loc) { EndLoc = Loc; }
+  SourceLocation getLocEnd() const LLVM_READONLY;
   virtual SourceRange getSourceRange() const LLVM_READONLY {
-    return SourceRange(getLocation(), EndLoc);
+    return SourceRange(getLocation(), getLocEnd());
   }
 
   SourceLocation getSelectorStartLoc() const {
@@ -310,7 +314,7 @@ public:
                                    getSelLocsKind() == SelLoc_StandardWithSpace,
                       llvm::makeArrayRef(const_cast<ParmVarDecl**>(getParams()),
                                          NumParams),
-                                   EndLoc);
+                                   DeclEndLoc);
     return getStoredSelLocs()[Index];
   }
 
@@ -359,7 +363,7 @@ public:
   }
 
   /// \brief Sets the method's parameters and selector source locations.
-  /// If the method is implicit (not coming from source) \arg SelLocs is
+  /// If the method is implicit (not coming from source) \p SelLocs is
   /// ignored.
   void setMethodParams(ASTContext &C,
                        ArrayRef<ParmVarDecl*> Params,
@@ -547,21 +551,25 @@ public:
   }
 };
 
-/// ObjCInterfaceDecl - Represents an ObjC class declaration. For example:
+/// \brief Represents an ObjC class declaration.
 ///
+/// For example:
+///
+/// \code
 ///   // MostPrimitive declares no super class (not particularly useful).
 ///   \@interface MostPrimitive
 ///     // no instance variables or methods.
 ///   \@end
 ///
 ///   // NSResponder inherits from NSObject & implements NSCoding (a protocol).
-///   \@interface NSResponder : NSObject <NSCoding>
+///   \@interface NSResponder : NSObject \<NSCoding>
 ///   { // instance variables are represented by ObjCIvarDecl.
 ///     id nextResponder; // nextResponder instance variable.
 ///   }
 ///   - (NSResponder *)nextResponder; // return a pointer to NSResponder.
 ///   - (void)mouseMoved:(NSEvent *)theEvent; // return void, takes a pointer
 ///   \@end                                    // to an NSEvent.
+/// \endcode
 ///
 ///   Unlike C/C++, forward class declarations are accomplished with \@class.
 ///   Unlike C/C++, \@class allows for a list of classes to be forward declared.
@@ -931,8 +939,13 @@ public:
   }
   ObjCInterfaceDecl *lookupInheritedClass(const IdentifierInfo *ICName);
 
-  // Lookup a method in the classes implementation hierarchy.
-  ObjCMethodDecl *lookupPrivateMethod(const Selector &Sel, bool Instance=true);
+  /// \brief Lookup a method in the classes implementation hierarchy.
+  ObjCMethodDecl *lookupPrivateMethod(const Selector &Sel,
+                                      bool Instance=true) const;
+
+  ObjCMethodDecl *lookupPrivateClassMethod(const Selector &Sel) {
+    return lookupPrivateMethod(Sel, false);
+  }
 
   SourceLocation getEndOfDefinitionLoc() const { 
     if (!hasDefinition())
@@ -1016,7 +1029,7 @@ private:
                QualType T, TypeSourceInfo *TInfo, AccessControl ac, Expr *BW,
                bool synthesized)
     : FieldDecl(ObjCIvar, DC, StartLoc, IdLoc, Id, T, TInfo, BW,
-                /*Mutable=*/false, /*HasInit=*/false),
+                /*Mutable=*/false, /*HasInit=*/ICIS_NoInit),
       NextIvar(0), DeclAccess(ac), Synthesized(synthesized) {}
 
 public:
@@ -1065,8 +1078,7 @@ private:
 };
 
 
-/// ObjCAtDefsFieldDecl - Represents a field declaration created by an
-/// \@defs(...).
+/// \brief Represents a field declaration created by an \@defs(...).
 class ObjCAtDefsFieldDecl : public FieldDecl {
   virtual void anchor();
   ObjCAtDefsFieldDecl(DeclContext *DC, SourceLocation StartLoc,
@@ -1074,7 +1086,7 @@ class ObjCAtDefsFieldDecl : public FieldDecl {
                       QualType T, Expr *BW)
     : FieldDecl(ObjCAtDefsField, DC, StartLoc, IdLoc, Id, T,
                 /*TInfo=*/0, // FIXME: Do ObjCAtDefs have declarators ?
-                BW, /*Mutable=*/false, /*HasInit=*/false) {}
+                BW, /*Mutable=*/false, /*HasInit=*/ICIS_NoInit) {}
 
 public:
   static ObjCAtDefsFieldDecl *Create(ASTContext &C, DeclContext *DC,
@@ -1090,29 +1102,35 @@ public:
   static bool classofKind(Kind K) { return K == ObjCAtDefsField; }
 };
 
-/// ObjCProtocolDecl - Represents a protocol declaration. ObjC protocols
-/// declare a pure abstract type (i.e no instance variables are permitted).
-/// Protocols originally drew inspiration from C++ pure virtual functions (a C++
-/// feature with nice semantics and lousy syntax:-). Here is an example:
+/// \brief Represents an Objective-C protocol declaration.
 ///
+/// Objective-C protocols declare a pure abstract type (i.e., no instance
+/// variables are permitted).  Protocols originally drew inspiration from
+/// C++ pure virtual functions (a C++ feature with nice semantics and lousy
+/// syntax:-). Here is an example:
+///
+/// \code
 /// \@protocol NSDraggingInfo <refproto1, refproto2>
 /// - (NSWindow *)draggingDestinationWindow;
 /// - (NSImage *)draggedImage;
 /// \@end
+/// \endcode
 ///
 /// This says that NSDraggingInfo requires two methods and requires everything
 /// that the two "referenced protocols" 'refproto1' and 'refproto2' require as
 /// well.
 ///
-/// \@interface ImplementsNSDraggingInfo : NSObject <NSDraggingInfo>
+/// \code
+/// \@interface ImplementsNSDraggingInfo : NSObject \<NSDraggingInfo>
 /// \@end
+/// \endcode
 ///
 /// ObjC protocols inspired Java interfaces. Unlike Java, ObjC classes and
 /// protocols are in distinct namespaces. For example, Cocoa defines both
 /// an NSObject protocol and class (which isn't allowed in Java). As a result,
 /// protocols are referenced using angle brackets as follows:
 ///
-/// id <NSDraggingInfo> anyObjectThatImplementsNSDraggingInfo;
+/// id \<NSDraggingInfo> anyObjectThatImplementsNSDraggingInfo;
 ///
 class ObjCProtocolDecl : public ObjCContainerDecl,
                          public Redeclarable<ObjCProtocolDecl> {
@@ -1298,9 +1316,6 @@ class ObjCCategoryDecl : public ObjCContainerDecl {
   /// FIXME: this should not be a singly-linked list.  Move storage elsewhere.
   ObjCCategoryDecl *NextClassCategory;
 
-  /// true of class extension has at least one bitfield ivar.
-  bool HasSynthBitfield : 1;
-
   /// \brief The location of the category name in this declaration.
   SourceLocation CategoryNameLoc;
 
@@ -1314,7 +1329,7 @@ class ObjCCategoryDecl : public ObjCContainerDecl {
                    SourceLocation IvarLBraceLoc=SourceLocation(),
                    SourceLocation IvarRBraceLoc=SourceLocation())
     : ObjCContainerDecl(ObjCCategory, DC, Id, ClassNameLoc, AtLoc),
-      ClassInterface(IDecl), NextClassCategory(0), HasSynthBitfield(false),
+      ClassInterface(IDecl), NextClassCategory(0),
       CategoryNameLoc(CategoryNameLoc),
       IvarLBraceLoc(IvarLBraceLoc), IvarRBraceLoc(IvarRBraceLoc) {
   }
@@ -1363,9 +1378,6 @@ public:
 
   bool IsClassExtension() const { return getIdentifier() == 0; }
   const ObjCCategoryDecl *getNextClassExtension() const;
-
-  bool hasSynthBitfield() const { return HasSynthBitfield; }
-  void setHasSynthBitfield (bool val) { HasSynthBitfield = val; }
 
   typedef specific_decl_iterator<ObjCIvarDecl> ivar_iterator;
   ivar_iterator ivar_begin() const {
@@ -1512,15 +1524,6 @@ public:
     return Id ? Id->getNameStart() : "";
   }
 
-  /// getNameAsCString - Get the name of identifier for the class
-  /// interface associated with this implementation as a C string
-  /// (const char*).
-  //
-  // FIXME: Deprecated, move clients to getName().
-  const char *getNameAsCString() const {
-    return Id ? Id->getNameStart() : "";
-  }
-
   /// @brief Get the name of the class associated with this interface.
   //
   // FIXME: Deprecated, move clients to getName().
@@ -1568,9 +1571,6 @@ class ObjCImplementationDecl : public ObjCImplDecl {
   /// true if class has a .cxx_[construct,destruct] method.
   bool HasCXXStructors : 1;
 
-  /// true of class extension has at least one bitfield ivar.
-  bool HasSynthBitfield : 1;
-
   ObjCImplementationDecl(DeclContext *DC,
                          ObjCInterfaceDecl *classInterface,
                          ObjCInterfaceDecl *superDecl,
@@ -1581,7 +1581,7 @@ class ObjCImplementationDecl : public ObjCImplDecl {
        SuperClass(superDecl), IvarLBraceLoc(IvarLBraceLoc), 
        IvarRBraceLoc(IvarRBraceLoc),
        IvarInitializers(0), NumIvarInitializers(0),
-       HasCXXStructors(false), HasSynthBitfield(false){}
+       HasCXXStructors(false) {}
 public:
   static ObjCImplementationDecl *Create(ASTContext &C, DeclContext *DC,
                                         ObjCInterfaceDecl *classInterface,
@@ -1628,9 +1628,6 @@ public:
   bool hasCXXStructors() const { return HasCXXStructors; }
   void setHasCXXStructors(bool val) { HasCXXStructors = val; }
 
-  bool hasSynthBitfield() const { return HasSynthBitfield; }
-  void setHasSynthBitfield (bool val) { HasSynthBitfield = val; }
-
   /// getIdentifier - Get the identifier that names the class
   /// interface associated with this implementation.
   IdentifierInfo *getIdentifier() const {
@@ -1645,15 +1642,6 @@ public:
   StringRef getName() const {
     assert(getIdentifier() && "Name is not a simple identifier");
     return getIdentifier()->getName();
-  }
-
-  /// getNameAsCString - Get the name of identifier for the class
-  /// interface associated with this implementation as a C string
-  /// (const char*).
-  //
-  // FIXME: Move to StringRef API.
-  const char *getNameAsCString() const {
-    return getName().data();
   }
 
   /// @brief Get the name of the class associated with this interface.
@@ -1725,10 +1713,12 @@ public:
 
 };
 
-/// ObjCPropertyDecl - Represents one property declaration in an interface.
-/// For example:
-/// \@property (assign, readwrite) int MyProperty;
+/// \brief Represents one property declaration in an Objective-C interface.
 ///
+/// For example:
+/// \code{.mm}
+/// \@property (assign, readwrite) int MyProperty;
+/// \endcode
 class ObjCPropertyDecl : public NamedDecl {
   virtual void anchor();
 public:
@@ -1981,6 +1971,17 @@ public:
                            SourceLocation IvarLoc) {
     PropertyIvarDecl = Ivar;
     this->IvarLoc = IvarLoc;
+  }
+
+  /// \brief For \@synthesize, returns true if an ivar name was explicitly
+  /// specified.
+  ///
+  /// \code
+  /// \@synthesize int a = b; // true
+  /// \@synthesize int a; // false
+  /// \endcode
+  bool isIvarNameSpecified() const {
+    return IvarLoc.isValid() && IvarLoc != getLocation();
   }
 
   Expr *getGetterCXXConstructor() const {

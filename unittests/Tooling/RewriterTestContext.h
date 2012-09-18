@@ -20,7 +20,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Frontend/DiagnosticOptions.h"
 #include "clang/Frontend/TextDiagnosticPrinter.h"
-#include "clang/Rewrite/Rewriter.h"
+#include "clang/Rewrite/Core/Rewriter.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
@@ -35,7 +35,7 @@ namespace clang {
 class RewriterTestContext {
  public:
   RewriterTestContext()
-      : Diagnostics(llvm::IntrusiveRefCntPtr<DiagnosticIDs>()),
+      : Diagnostics(llvm::IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs)),
         DiagnosticPrinter(llvm::outs(), DiagnosticOptions()),
         Files((FileSystemOptions())),
         Sources(Diagnostics, Files),

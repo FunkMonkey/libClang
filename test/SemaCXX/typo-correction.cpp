@@ -116,14 +116,14 @@ void TestRedecl::add_in(int i) {} // expected-error{{out-of-line definition of '
 
 // Test the improved typo correction for the Parser::ParseCastExpr =>
 // Sema::ActOnIdExpression => Sema::DiagnoseEmptyLookup call path.
-class SomeNetMessage;
+class SomeNetMessage; // expected-note 2{{'SomeNetMessage'}}
 class Message {};
 void foo(Message&);
 void foo(SomeNetMessage&);
 void doit(void *data) {
   Message somenetmsg; // expected-note{{'somenetmsg' declared here}}
   foo(somenetmessage); // expected-error{{use of undeclared identifier 'somenetmessage'; did you mean 'somenetmsg'?}}
-  foo((somenetmessage)data); // expected-error{{use of undeclared identifier 'somenetmessage'; did you mean 'SomeNetMessage'?}}
+  foo((somenetmessage)data); // expected-error{{unknown type name 'somenetmessage'; did you mean 'SomeNetMessage'?}} expected-error{{incomplete type}}
 }
 
 // Test the typo-correction callback in BuildRecoveryCallExpr.
@@ -155,7 +155,7 @@ void Test3() {
 struct R {};
 bool begun(R);
 void RangeTest() {
-  for (auto b : R()) {} // expected-error {{use of undeclared identifier 'begin'}} expected-note {{range has type}}
+  for (auto b : R()) {} // expected-error {{invalid range expression of type 'R'}}
 }
 
 // PR 12019 - Avoid infinite mutual recursion in DiagnoseInvalidRedeclaration
@@ -172,7 +172,7 @@ void Child::add_types(int value) {} // expected-error{{out-of-line definition of
 // Sema::ActOnIdExpression by Parser::ParseCastExpression to allow type names as
 // potential corrections for template arguments.
 namespace clash {
-class ConstructExpr {}; // expected-note{{'clash::ConstructExpr' declared here}}
+class ConstructExpr {}; // expected-note 2{{'clash::ConstructExpr' declared here}}
 }
 class ClashTool {
   bool HaveConstructExpr();
@@ -180,7 +180,7 @@ class ClashTool {
 
   void test() {
     ConstructExpr *expr = // expected-error{{unknown type name 'ConstructExpr'; did you mean 'clash::ConstructExpr'?}}
-        getExprAs<ConstructExpr>(); // expected-error{{use of undeclared identifier 'ConstructExpr'; did you mean 'clash::ConstructExpr'?}}
+        getExprAs<ConstructExpr>(); // expected-error{{unknown type name 'ConstructExpr'; did you mean 'clash::ConstructExpr'?}}
   }
 };
 
@@ -205,4 +205,34 @@ namespace PR12951 {
 namespace foobar { struct Thing {}; }
 namespace bazquux { struct Thing {}; }
 void f() { Thing t; } // expected-error{{unknown type name 'Thing'}}
+}
+
+namespace PR13051 {
+  template<typename T> struct S {
+    template<typename U> void f();
+    operator bool() const;
+  };
+
+  void f() {
+    f(&S<int>::tempalte f<int>); // expected-error{{did you mean 'template'?}}
+    f(&S<int>::opeartor bool); // expected-error{{did you mean 'operator'?}}
+    f(&S<int>::foo); // expected-error-re{{no member named 'foo' in 'PR13051::S<int>'$}}
+  }
+}
+
+inf f(doulbe); // expected-error{{'int'}} expected-error{{'double'}}
+
+namespace PR6325 {
+class foo { }; // expected-note{{'foo' declared here}}
+// Note that for this example (pulled from the PR), if keywords are not excluded
+// as correction candidates then no suggestion would be given; correcting
+// 'boo' to 'bool' is the same edit distance as correcting 'boo' to 'foo'.
+class bar : boo { }; // expected-error{{unknown class name 'boo'; did you mean 'foo'?}}
+}
+
+namespace bogus_keyword_suggestion {
+void test() {
+   status = "OK"; // expected-error-re{{use of undeclared identifier 'status'$}}
+   return status; // expected-error-re{{use of undeclared identifier 'status'$}}
+ }
 }

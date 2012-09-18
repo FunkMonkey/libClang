@@ -23,12 +23,13 @@ using namespace clang;
 
 /// Create a TokenLexer for the specified macro with the specified actual
 /// arguments.  Note that this ctor takes ownership of the ActualArgs pointer.
-void TokenLexer::Init(Token &Tok, SourceLocation ELEnd, MacroArgs *Actuals) {
+void TokenLexer::Init(Token &Tok, SourceLocation ELEnd, MacroInfo *MI,
+                      MacroArgs *Actuals) {
   // If the client is reusing a TokenLexer, make sure to free any memory
   // associated with it.
   destroy();
 
-  Macro = PP.getMacroInfo(Tok.getIdentifierInfo());
+  Macro = MI;
   ActualArgs = Actuals;
   CurToken = 0;
 
@@ -224,6 +225,12 @@ void TokenLexer::ExpandFunctionArguments() {
           Token &Tok = ResultToks[i];
           if (Tok.is(tok::hashhash))
             Tok.setKind(tok::unknown);
+          // In Microsoft-compatibility mode, we follow MSVC's preprocessing
+          // behaviour by not considering commas from nested macro expansions
+          // as argument separators. Set a flag on the token so we can test
+          // for this later when the macro expansion is processed.
+          if (Tok.is(tok::comma) && PP.getLangOpts().MicrosoftMode)
+            Tok.setFlag(Token::IgnoredComma);
         }
 
         if(ExpandLocStart.isValid()) {
@@ -252,9 +259,9 @@ void TokenLexer::ExpandFunctionArguments() {
     const Token *ArgToks = ActualArgs->getUnexpArgument(ArgNo);
     unsigned NumToks = MacroArgs::getArgLength(ArgToks);
     if (NumToks) {  // Not an empty argument?
-      // If this is the GNU ", ## __VA_ARG__" extension, and we just learned
-      // that __VA_ARG__ expands to multiple tokens, avoid a pasting error when
-      // the expander trys to paste ',' with the first token of the __VA_ARG__
+      // If this is the GNU ", ## __VA_ARGS__" extension, and we just learned
+      // that __VA_ARGS__ expands to multiple tokens, avoid a pasting error when
+      // the expander trys to paste ',' with the first token of the __VA_ARGS__
       // expansion.
       if (PasteBefore && ResultToks.size() >= 2 &&
           ResultToks[ResultToks.size()-2].is(tok::comma) &&
@@ -568,8 +575,8 @@ bool TokenLexer::PasteTokens(Token &Tok) {
             << Buffer.str();
         }
 
-        // Do not consume the RHS.
-        --CurToken;
+        // An error has occurred so exit loop.
+        break;
       }
 
       // Turn ## into 'unknown' to avoid # ## # from looking like a paste
@@ -578,7 +585,7 @@ bool TokenLexer::PasteTokens(Token &Tok) {
         Result.setKind(tok::unknown);
     }
 
-    // Transfer properties of the LHS over the the Result.
+    // Transfer properties of the LHS over the Result.
     Result.setFlagValue(Token::StartOfLine , Tok.isAtStartOfLine());
     Result.setFlagValue(Token::LeadingSpace, Tok.hasLeadingSpace());
     

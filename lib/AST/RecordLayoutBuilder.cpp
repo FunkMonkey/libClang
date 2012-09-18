@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/Decl.h"
@@ -788,8 +789,8 @@ protected:
   void setDataSize(CharUnits NewSize) { DataSize = Context.toBits(NewSize); }
   void setDataSize(uint64_t NewSize) { DataSize = NewSize; }
 
-  RecordLayoutBuilder(const RecordLayoutBuilder&);   // DO NOT IMPLEMENT
-  void operator=(const RecordLayoutBuilder&); // DO NOT IMPLEMENT
+  RecordLayoutBuilder(const RecordLayoutBuilder &) LLVM_DELETED_FUNCTION;
+  void operator=(const RecordLayoutBuilder &) LLVM_DELETED_FUNCTION;
 public:
   static const CXXMethodDecl *ComputeKeyFunction(const CXXRecordDecl *RD);
 };
@@ -2262,6 +2263,20 @@ RecordLayoutBuilder::updateExternalFieldOffset(const FieldDecl *Field,
   return ExternalFieldOffset;
 }
 
+/// \brief Get diagnostic %select index for tag kind for
+/// field padding diagnostic message.
+/// WARNING: Indexes apply to particular diagnostics only!
+///
+/// \returns diagnostic %select index.
+static unsigned getPaddingDiagFromTagKind(TagTypeKind Tag) {
+  switch (Tag) {
+  case TTK_Struct: return 0;
+  case TTK_Interface: return 1;
+  case TTK_Class: return 2;
+  default: llvm_unreachable("Invalid tag kind for field padding diagnostic!");
+  }
+}
+
 void RecordLayoutBuilder::CheckFieldPadding(uint64_t Offset,
                                             uint64_t UnpaddedOffset,
                                             uint64_t UnpackedOffset,
@@ -2290,14 +2305,14 @@ void RecordLayoutBuilder::CheckFieldPadding(uint64_t Offset,
     }
     if (D->getIdentifier())
       Diag(D->getLocation(), diag::warn_padded_struct_field)
-          << (D->getParent()->isStruct() ? 0 : 1) // struct|class
+          << getPaddingDiagFromTagKind(D->getParent()->getTagKind())
           << Context.getTypeDeclType(D->getParent())
           << PadSize
           << (InBits ? 1 : 0) /*(byte|bit)*/ << (PadSize > 1) // plural or not
           << D->getIdentifier();
     else
       Diag(D->getLocation(), diag::warn_padded_struct_anon_field)
-          << (D->getParent()->isStruct() ? 0 : 1) // struct|class
+          << getPaddingDiagFromTagKind(D->getParent()->getTagKind())
           << Context.getTypeDeclType(D->getParent())
           << PadSize
           << (InBits ? 1 : 0) /*(byte|bit)*/ << (PadSize > 1); // plural or not
@@ -2348,6 +2363,10 @@ RecordLayoutBuilder::ComputeKeyFunction(const CXXRecordDecl *RD) {
       continue;
 
     if (MD->hasInlineBody())
+      continue;
+
+    // Ignore inline deleted or defaulted functions.
+    if (!MD->isUserProvided())
       continue;
 
     // We found it.
@@ -2503,8 +2522,8 @@ ASTContext::getObjCLayout(const ObjCInterfaceDecl *D,
   assert(D && D->isThisDeclarationADefinition() && "Invalid interface decl!");
 
   // Look up this layout, if already laid out, return what we have.
-  ObjCContainerDecl *Key =
-    Impl ? (ObjCContainerDecl*) Impl : (ObjCContainerDecl*) D;
+  const ObjCContainerDecl *Key =
+    Impl ? (const ObjCContainerDecl*) Impl : (const ObjCContainerDecl*) D;
   if (const ASTRecordLayout *Entry = ObjCLayouts[Key])
     return *Entry;
 

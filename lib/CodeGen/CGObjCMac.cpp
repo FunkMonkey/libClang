@@ -241,9 +241,9 @@ public:
     Params.push_back(Ctx.getPointerDiffType()->getCanonicalTypeUnqualified());
     Params.push_back(Ctx.BoolTy);
     llvm::FunctionType *FTy =
-      Types.GetFunctionType(Types.arrangeFunctionType(IdType, Params,
-                                                      FunctionType::ExtInfo(),
-                                                      RequiredArgs::All));
+      Types.GetFunctionType(Types.arrangeLLVMFunctionInfo(IdType, Params,
+                                                    FunctionType::ExtInfo(),
+                                                          RequiredArgs::All));
     return CGM.CreateRuntimeFunction(FTy, "objc_getProperty");
   }
 
@@ -261,9 +261,9 @@ public:
     Params.push_back(Ctx.BoolTy);
     Params.push_back(Ctx.BoolTy);
     llvm::FunctionType *FTy =
-      Types.GetFunctionType(Types.arrangeFunctionType(Ctx.VoidTy, Params,
-                                                      FunctionType::ExtInfo(),
-                                                      RequiredArgs::All));
+      Types.GetFunctionType(Types.arrangeLLVMFunctionInfo(Ctx.VoidTy, Params,
+                                                     FunctionType::ExtInfo(),
+                                                          RequiredArgs::All));
     return CGM.CreateRuntimeFunction(FTy, "objc_setProperty");
   }
 
@@ -287,9 +287,9 @@ public:
     Params.push_back(IdType);
     Params.push_back(Ctx.getPointerDiffType()->getCanonicalTypeUnqualified());
     llvm::FunctionType *FTy =
-    Types.GetFunctionType(Types.arrangeFunctionType(Ctx.VoidTy, Params,
-                                                    FunctionType::ExtInfo(),
-                                                    RequiredArgs::All));
+    Types.GetFunctionType(Types.arrangeLLVMFunctionInfo(Ctx.VoidTy, Params,
+                                                        FunctionType::ExtInfo(),
+                                                        RequiredArgs::All));
     const char *name;
     if (atomic && copy)
       name = "objc_setProperty_atomic_copy";
@@ -314,9 +314,9 @@ public:
     Params.push_back(Ctx.BoolTy);
     Params.push_back(Ctx.BoolTy);
     llvm::FunctionType *FTy =
-      Types.GetFunctionType(Types.arrangeFunctionType(Ctx.VoidTy, Params,
-                                                      FunctionType::ExtInfo(),
-                                                      RequiredArgs::All));
+      Types.GetFunctionType(Types.arrangeLLVMFunctionInfo(Ctx.VoidTy, Params,
+                                                     FunctionType::ExtInfo(),
+                                                          RequiredArgs::All));
     return CGM.CreateRuntimeFunction(FTy, "objc_copyStruct");
   }
   
@@ -333,9 +333,9 @@ public:
     Params.push_back(Ctx.VoidPtrTy);
     Params.push_back(Ctx.VoidPtrTy);
     llvm::FunctionType *FTy =
-      Types.GetFunctionType(Types.arrangeFunctionType(Ctx.VoidTy, Params,
-                                                      FunctionType::ExtInfo(),
-                                                      RequiredArgs::All));
+      Types.GetFunctionType(Types.arrangeLLVMFunctionInfo(Ctx.VoidTy, Params,
+                                                     FunctionType::ExtInfo(),
+                                                          RequiredArgs::All));
     return CGM.CreateRuntimeFunction(FTy, "objc_copyCppObjectAtomic");
   }
   
@@ -346,7 +346,7 @@ public:
     SmallVector<CanQualType,1> Params;
     Params.push_back(Ctx.getCanonicalParamType(Ctx.getObjCIdType()));
     llvm::FunctionType *FTy =
-      Types.GetFunctionType(Types.arrangeFunctionType(Ctx.VoidTy, Params,
+      Types.GetFunctionType(Types.arrangeLLVMFunctionInfo(Ctx.VoidTy, Params,
                                                       FunctionType::ExtInfo(),
                                                       RequiredArgs::All));
     return CGM.CreateRuntimeFunction(FTy, "objc_enumerationMutation");
@@ -433,19 +433,19 @@ public:
   
   /// SyncEnterFn - LLVM object_sync_enter function.
   llvm::Constant *getSyncEnterFn() {
-    // void objc_sync_enter (id)
+    // int objc_sync_enter (id)
     llvm::Type *args[] = { ObjectPtrTy };
     llvm::FunctionType *FTy =
-      llvm::FunctionType::get(CGM.VoidTy, args, false);
+      llvm::FunctionType::get(CGM.IntTy, args, false);
     return CGM.CreateRuntimeFunction(FTy, "objc_sync_enter");
   }
 
   /// SyncExitFn - LLVM object_sync_exit function.
   llvm::Constant *getSyncExitFn() {
-    // void objc_sync_exit (id)
+    // int objc_sync_exit (id)
     llvm::Type *args[] = { ObjectPtrTy };
     llvm::FunctionType *FTy =
-      llvm::FunctionType::get(CGM.VoidTy, args, false);
+      llvm::FunctionType::get(CGM.IntTy, args, false);
     return CGM.CreateRuntimeFunction(FTy, "objc_sync_exit");
   }
 
@@ -1860,7 +1860,7 @@ llvm::Constant *CGObjCCommonMac::BuildGCBlockLayout(CodeGenModule &CGM,
   llvm::Constant *C = BuildIvarLayoutBitmap(BitMap);
   if (CGM.getLangOpts().ObjCGCBitmapPrint) {
     printf("\n block variable layout for block: ");
-    const unsigned char *s = (unsigned char*)BitMap.c_str();
+    const unsigned char *s = (const unsigned char*)BitMap.c_str();
     for (unsigned i = 0, e = BitMap.size(); i < e; i++)
       if (!(s[i] & 0xf0))
         printf("0x0%x%s", s[i], s[i] != 0 ? ", " : "");
@@ -2515,7 +2515,7 @@ llvm::Constant *CGObjCMac::EmitMetaClass(const ObjCImplementationDecl *ID,
                                                    Values);
 
   std::string Name("\01L_OBJC_METACLASS_");
-  Name += ID->getNameAsCString();
+  Name += ID->getName();
 
   // Check for a forward reference.
   llvm::GlobalVariable *GV = CGM.getModule().getGlobalVariable(Name);
@@ -4187,7 +4187,7 @@ llvm::Constant *CGObjCCommonMac::BuildIvarLayout(
     printf("\n%s ivar layout for class '%s': ",
            ForStrongLayout ? "strong" : "weak",
            OMD->getClassInterface()->getName().data());
-    const unsigned char *s = (unsigned char*)BitMap.c_str();
+    const unsigned char *s = (const unsigned char*)BitMap.c_str();
     for (unsigned i = 0, e = BitMap.size(); i < e; i++)
       if (!(s[i] & 0xf0))
         printf("0x0%x%s", s[i], s[i] != 0 ? ", " : "");
@@ -4386,9 +4386,10 @@ ObjCCommonTypesHelper::ObjCCommonTypesHelper(CodeGen::CodeGenModule &cgm)
                                       SourceLocation(), SourceLocation(),
                                       &Ctx.Idents.get("_objc_super"));
   RD->addDecl(FieldDecl::Create(Ctx, RD, SourceLocation(), SourceLocation(), 0,
-                                Ctx.getObjCIdType(), 0, 0, false, false));
+                                Ctx.getObjCIdType(), 0, 0, false, ICIS_NoInit));
   RD->addDecl(FieldDecl::Create(Ctx, RD, SourceLocation(), SourceLocation(), 0,
-                                Ctx.getObjCClassType(), 0, 0, false, false));
+                                Ctx.getObjCClassType(), 0, 0, false,
+                                ICIS_NoInit));
   RD->completeDefinition();
 
   SuperCTy = Ctx.getTagDeclType(RD);
@@ -4767,9 +4768,10 @@ ObjCNonFragileABITypesHelper::ObjCNonFragileABITypesHelper(CodeGen::CodeGenModul
                                       SourceLocation(), SourceLocation(),
                                       &Ctx.Idents.get("_message_ref_t"));
   RD->addDecl(FieldDecl::Create(Ctx, RD, SourceLocation(), SourceLocation(), 0,
-                                Ctx.VoidPtrTy, 0, 0, false, false));
+                                Ctx.VoidPtrTy, 0, 0, false, ICIS_NoInit));
   RD->addDecl(FieldDecl::Create(Ctx, RD, SourceLocation(), SourceLocation(), 0,
-                                Ctx.getObjCSelType(), 0, 0, false, false));
+                                Ctx.getObjCSelType(), 0, 0, false,
+                                ICIS_NoInit));
   RD->completeDefinition();
 
   MessageRefCTy = Ctx.getTagDeclType(RD);
@@ -6379,7 +6381,18 @@ CGObjCNonFragileABIMac::GetInterfaceEHType(const ObjCInterfaceDecl *ID,
 
 CodeGen::CGObjCRuntime *
 CodeGen::CreateMacObjCRuntime(CodeGen::CodeGenModule &CGM) {
-  if (CGM.getLangOpts().ObjCNonFragileABI)
-    return new CGObjCNonFragileABIMac(CGM);
+  switch (CGM.getLangOpts().ObjCRuntime.getKind()) {
+  case ObjCRuntime::FragileMacOSX:
   return new CGObjCMac(CGM);
+
+  case ObjCRuntime::MacOSX:
+  case ObjCRuntime::iOS:
+    return new CGObjCNonFragileABIMac(CGM);
+
+  case ObjCRuntime::GNUstep:
+  case ObjCRuntime::GCC:
+  case ObjCRuntime::ObjFW:
+    llvm_unreachable("these runtimes are not Mac runtimes");
+  }
+  llvm_unreachable("bad runtime");
 }

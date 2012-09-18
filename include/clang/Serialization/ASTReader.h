@@ -199,6 +199,8 @@ class ASTReader
     public ExternalSLocEntrySource
 {
 public:
+  typedef SmallVector<uint64_t, 64> RecordData;
+
   enum ASTReadResult { Success, Failure, IgnorePCH };
   /// \brief Types of AST files.
   friend class PCHValidator;
@@ -454,7 +456,7 @@ private:
   /// consumer eagerly.
   SmallVector<uint64_t, 16> ExternalDefinitions;
 
-  /// \brief The IDs of all tentative definitions stored in the the chain.
+  /// \brief The IDs of all tentative definitions stored in the chain.
   ///
   /// Sema keeps track of all tentative definitions in a TU because it has to
   /// complete them and pass them on to CodeGen. Thus, tentative definitions in
@@ -756,8 +758,8 @@ private:
     ASTReader &Reader;
     enum ReadingKind PrevKind;
 
-    ReadingKindTracker(const ReadingKindTracker&); // do not implement
-    ReadingKindTracker &operator=(const ReadingKindTracker&);// do not implement
+    ReadingKindTracker(const ReadingKindTracker &) LLVM_DELETED_FUNCTION;
+    void operator=(const ReadingKindTracker &) LLVM_DELETED_FUNCTION;
 
   public:
     ReadingKindTracker(enum ReadingKind newKind, ASTReader &reader)
@@ -801,7 +803,7 @@ private:
   llvm::BitstreamCursor &SLocCursorForID(int ID);
   SourceLocation getImportLocation(ModuleFile *F);
   ASTReadResult ReadSubmoduleBlock(ModuleFile &F);
-  bool ParseLanguageOptions(const SmallVectorImpl<uint64_t> &Record);
+  bool ParseLanguageOptions(const RecordData &Record);
   
   struct RecordLocation {
     RecordLocation(ModuleFile *M, uint64_t O)
@@ -824,24 +826,25 @@ private:
   RecordLocation getLocalBitOffset(uint64_t GlobalOffset);
   uint64_t getGlobalBitOffset(ModuleFile &M, uint32_t LocalOffset);
 
-  /// \brief Returns the first preprocessed entity ID that ends after \arg BLoc.
+  /// \brief Returns the first preprocessed entity ID that ends after BLoc.
   serialization::PreprocessedEntityID
     findBeginPreprocessedEntity(SourceLocation BLoc) const;
 
-  /// \brief Returns the first preprocessed entity ID that begins after \arg
-  /// ELoc.
+  /// \brief Returns the first preprocessed entity ID that begins after ELoc.
   serialization::PreprocessedEntityID
     findEndPreprocessedEntity(SourceLocation ELoc) const;
 
-  /// \brief \arg SLocMapI points at a chunk of a module that contains no
-  /// preprocessed entities or the entities it contains are not the ones we are
-  /// looking for. Find the next module that contains entities and return the ID
+  /// \brief Find the next module that contains entities and return the ID
   /// of the first entry.
+  ///
+  /// \param SLocMapI points at a chunk of a module that contains no
+  /// preprocessed entities or the entities it contains are not the
+  /// ones we are looking for.
   serialization::PreprocessedEntityID
     findNextPreprocessedEntity(
                         GlobalSLocOffsetMapType::const_iterator SLocMapI) const;
 
-  /// \brief Returns (ModuleFile, Local index) pair for \arg GlobalIndex of a
+  /// \brief Returns (ModuleFile, Local index) pair for \p GlobalIndex of a
   /// preprocessed entity.
   std::pair<ModuleFile *, unsigned>
     getModulePreprocessedEntity(unsigned GlobalIndex);
@@ -859,11 +862,9 @@ private:
   void Error(unsigned DiagID, StringRef Arg1 = StringRef(),
              StringRef Arg2 = StringRef());
 
-  ASTReader(const ASTReader&); // do not implement
-  ASTReader &operator=(const ASTReader &); // do not implement
+  ASTReader(const ASTReader &) LLVM_DELETED_FUNCTION;
+  void operator=(const ASTReader &) LLVM_DELETED_FUNCTION;
 public:
-  typedef SmallVector<uint64_t, 64> RecordData;
-
   /// \brief Load the AST file and validate its contents against the given
   /// Preprocessor.
   ///
@@ -910,8 +911,8 @@ public:
   ///
   /// \param Mod The module whose names should be made visible.
   ///
-  /// \param Visibility The level of visibility to give the names in the module.
-  /// Visibility can only be increased over time.
+  /// \param NameVisibility The level of visibility to give the names in the
+  /// module.  Visibility can only be increased over time.
   void makeModuleVisible(Module *Mod, 
                          Module::NameVisibilityKind NameVisibility);
   
@@ -968,12 +969,12 @@ public:
   virtual PreprocessedEntity *ReadPreprocessedEntity(unsigned Index);
 
   /// \brief Returns a pair of [Begin, End) indices of preallocated
-  /// preprocessed entities that \arg Range encompasses.
+  /// preprocessed entities that \p Range encompasses.
   virtual std::pair<unsigned, unsigned>
       findPreprocessedEntitiesInRange(SourceRange Range);
 
   /// \brief Optionally returns true or false if the preallocated preprocessed
-  /// entity with index \arg Index came from file \arg FID.
+  /// entity with index \p Index came from file \p FID.
   virtual llvm::Optional<bool> isPreprocessedEntityInFileID(unsigned Index,
                                                             FileID FID);
 
@@ -1067,15 +1068,14 @@ public:
   /// global declaration ID.
   serialization::DeclID getGlobalDeclID(ModuleFile &F, unsigned LocalID) const;
 
-  /// \brief Returns true if global DeclID \arg ID originated from module
-  /// \arg M.
+  /// \brief Returns true if global DeclID \p ID originated from module \p M.
   bool isDeclIDFromModule(serialization::GlobalDeclID ID, ModuleFile &M) const;
 
   /// \brief Retrieve the module file that owns the given declaration, or NULL
   /// if the declaration is not from a module file.
   ModuleFile *getOwningModuleFile(Decl *D);
   
-  /// \brief Returns the source location for the decl \arg ID.
+  /// \brief Returns the source location for the decl \p ID.
   SourceLocation getSourceLocationForDeclID(serialization::GlobalDeclID ID);
 
   /// \brief Resolve a declaration ID into a declaration, potentially
@@ -1172,7 +1172,7 @@ public:
                                         SmallVectorImpl<Decl*> &Decls);
 
   /// \brief Get the decls that are contained in a file in the Offset/Length
-  /// range. \arg Length can be 0 to indicate a point at \arg Offset instead of
+  /// range. \p Length can be 0 to indicate a point at \p Offset instead of
   /// a range.
   virtual void FindFileRegionDecls(FileID File, unsigned Offset,unsigned Length,
                                    SmallVectorImpl<Decl *> &Decls);
@@ -1501,6 +1501,13 @@ public:
   SwitchCase *getSwitchCaseWithID(unsigned ID);
 
   void ClearSwitchCaseIDs();
+
+  /// \brief Cursors for comments blocks.
+  SmallVector<std::pair<llvm::BitstreamCursor,
+                        serialization::ModuleFile *>, 8> CommentsCursors;
+
+  /// \brief Loads comments ranges.
+  void ReadComments();
 };
 
 /// \brief Helper class that saves the current stream position and

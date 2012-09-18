@@ -12,11 +12,15 @@ protected:
   int : 1, : 2;
 
 public:
+  void m0() {}; // ok, one extra ';' is permitted
+  void m1() {}
+  ; // ok, one extra ';' is permitted
   void m() {
     int l = 2;
-  }; // expected-warning{{extra ';' after function definition}}
+  };; // expected-warning{{extra ';' after member function definition}}
 
   template<typename T> void mt(T) { }
+  ;
   ; // expected-warning{{extra ';' inside a class}}
 
   virtual int vf() const volatile = 0;
@@ -82,6 +86,20 @@ namespace ctor_error {
     // expected-error{{unknown type name 'UnknownType'}}
   void Ctor::operator+(UnknownType*) {} // \
     // expected-error{{unknown type name 'UnknownType'}}
+}
+
+// PR13775: Don't assert here.
+namespace PR13775 {
+  class bar
+  {
+   public:
+    void foo ();
+    void baz ();
+  };
+  void bar::foo ()
+  {
+    baz x(); // expected-error 3{{}}
+  }
 }
 
 // PR11109 must appear at the end of the source file

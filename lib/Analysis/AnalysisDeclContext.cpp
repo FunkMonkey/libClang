@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclTemplate.h"
@@ -61,11 +62,13 @@ AnalysisDeclContext::AnalysisDeclContext(AnalysisDeclContextManager *Mgr,
 }
 
 AnalysisDeclContextManager::AnalysisDeclContextManager(bool useUnoptimizedCFG,
-                                               bool addImplicitDtors,
-                                               bool addInitializers) {
+                                                       bool addImplicitDtors,
+                                                       bool addInitializers,
+                                                       bool addTemporaryDtors) {
   cfgBuildOptions.PruneTriviallyFalseEdges = !useUnoptimizedCFG;
   cfgBuildOptions.AddImplicitDtors = addImplicitDtors;
   cfgBuildOptions.AddInitializers = addInitializers;
+  cfgBuildOptions.AddTemporaryDtors = addTemporaryDtors;
 }
 
 void AnalysisDeclContextManager::clear() {
@@ -180,8 +183,16 @@ void AnalysisDeclContext::dumpCFG(bool ShowColors) {
 }
 
 ParentMap &AnalysisDeclContext::getParentMap() {
-  if (!PM)
+  if (!PM) {
     PM.reset(new ParentMap(getBody()));
+    if (const CXXConstructorDecl *C = dyn_cast<CXXConstructorDecl>(getDecl())) {
+      for (CXXConstructorDecl::init_const_iterator I = C->init_begin(),
+                                                   E = C->init_end();
+           I != E; ++I) {
+        PM->addStmt((*I)->getInit());
+      }
+    }
+  }
   return *PM;
 }
 

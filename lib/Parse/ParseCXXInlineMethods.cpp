@@ -34,7 +34,7 @@ Decl *Parser::ParseCXXInlineMethodDef(AccessSpecifier AS,
           Tok.is(tok::equal)) &&
          "Current token not a '{', ':', '=', or 'try'!");
 
-  MultiTemplateParamsArg TemplateParams(Actions,
+  MultiTemplateParamsArg TemplateParams(
           TemplateInfo.TemplateParams ? TemplateInfo.TemplateParams->data() : 0,
           TemplateInfo.TemplateParams ? TemplateInfo.TemplateParams->size() : 0);
 
@@ -42,11 +42,11 @@ Decl *Parser::ParseCXXInlineMethodDef(AccessSpecifier AS,
   D.setFunctionDefinitionKind(DefinitionKind);
   if (D.getDeclSpec().isFriendSpecified())
     FnD = Actions.ActOnFriendFunctionDecl(getCurScope(), D,
-                                          move(TemplateParams));
+                                          TemplateParams);
   else {
     FnD = Actions.ActOnCXXMemberDeclarator(getCurScope(), AS, D,
-                                           move(TemplateParams), 0, 
-                                           VS, /*HasDeferredInit=*/false);
+                                           TemplateParams, 0,
+                                           VS, ICIS_NoInit);
     if (FnD) {
       Actions.ProcessDeclAttributeList(getCurScope(), FnD, AccessAttrs,
                                        false, true);
@@ -109,6 +109,7 @@ Decl *Parser::ParseCXXInlineMethodDef(AccessSpecifier AS,
   // or if we are about to parse function member template then consume
   // the tokens and store them for parsing at the end of the translation unit.
   if (getLangOpts().DelayedTemplateParsing && 
+      DefinitionKind == FDK_Definition && 
       ((Actions.CurContext->isDependentContext() ||
         TemplateInfo.Kind != ParsedTemplateInfo::NonTemplate) && 
         !Actions.IsInsideALocalClassWithinATemplateFunction())) {
@@ -493,7 +494,7 @@ void Parser::ParseLexedMemberInitializer(LateParsedMemberInitializer &MI) {
   ConsumeAnyToken();
 
   SourceLocation EqualLoc;
-    
+
   ExprResult Init = ParseCXXMemberInitializer(MI.Field, /*IsFunction=*/false, 
                                               EqualLoc);
 
